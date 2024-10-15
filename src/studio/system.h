@@ -37,7 +37,12 @@
 #define TIC_NAME_FULL TIC_NAME " tiny computer"
 #define TIC_TITLE TIC_NAME_FULL " " TIC_VERSION
 #define TIC_HOST "tic80.com"
-#define TIC_WEBSITE "https://" TIC_HOST
+#if defined(__TIC_WIN7__)
+    #define TIC_WEBSITE_PROTOCOL "http://"
+#else
+    #define TIC_WEBSITE_PROTOCOL "https://"
+#endif
+#define TIC_WEBSITE TIC_WEBSITE_PROTOCOL TIC_HOST
 #define TIC_COPYRIGHT TIC_WEBSITE " (C) 2017-" TIC_VERSION_YEAR
 
 #define TICNAME_MAX 256
@@ -57,6 +62,7 @@ void    tic_sys_fullscreen_set(bool value);
 void    tic_sys_message(const char* title, const char* message);
 void    tic_sys_title(const char* title);
 void    tic_sys_open_path(const char* path);
+void    tic_sys_open_url(const char* path);
 void    tic_sys_preseed();
 bool    tic_sys_keyboard_text(char* text);
 void    tic_sys_update_config();
@@ -72,6 +78,18 @@ void    tic_sys_default_mapping(tic_mapping* mapping);
     macro(COMMENT)  \
     macro(SIGN)
 
+enum KeybindMode {
+    KEYBIND_STANDARD,
+    KEYBIND_EMACS,
+    KEYBIND_VI
+};
+
+enum TabMode {
+    TAB_AUTO,
+    TAB_TAB,
+    TAB_SPACE
+};
+
 typedef struct
 {
     struct
@@ -86,7 +104,9 @@ typedef struct
             u8 cursor;
             bool shadow;
             bool altFont;
+            bool altCaret;
             bool matchDelimiters;
+            bool autoDelimiters;
 
         } code;
 
@@ -101,54 +121,56 @@ typedef struct
 
     } theme;
 
-    s32 gifScale;
-    s32 gifLength;
-    
     bool checkNewVersion;
     bool cli;
     bool soft;
+    bool trim;
 
-#if defined(CRT_SHADER_SUPPORT)
-    struct
+    struct StudioOptions
     {
-        const char* vertex;
-        const char* pixel;
-    } shader;
+#if defined(CRT_SHADER_SUPPORT)
+        bool crt;
 #endif
 
-    struct
-    {
-    #if defined(CRT_SHADER_SUPPORT)
-        bool crt;
-    #endif
-        
         bool fullscreen;
         bool vsync;
+        bool integerScale;
         s32 volume;
+        bool autosave;
         tic_mapping mapping;
+#if defined(BUILD_EDITORS)
+        enum KeybindMode keybindMode;
+        enum TabMode tabMode;
+        s32 tabSize;
+#endif
     } options;
 
     const tic_cartridge* cart;
 
     s32 uiScale;
 
+    int fft;
+    int fftcaptureplaybackdevices;
+    const char *fftdevice;
+
+    tic_layout keyboardLayout;
 } StudioConfig;
 
-typedef struct
-{
-    tic_mem* tic;
-    bool quit;
+typedef struct Studio Studio;
 
-    void (*tick)();
-    void (*sound)();
-    void (*exit)();
-    void (*close)();
-    void (*load)(const char* file);
-    const StudioConfig* (*config)();
+void setJustSwitchedToCodeMode(Studio* studio, bool value);
+bool hasJustSwitchedToCodeMode(Studio* studio);
+const tic_mem* studio_mem(Studio* studio);
+void studio_tick(Studio* studio, tic80_input input);
+void studio_sound(Studio* studio);
+void studio_load(Studio* studio, const char* file);
+void studio_keymapchanged(Studio *studio, tic_layout keyboardLayout);
+bool studio_alive(Studio* studio);
+void studio_exit(Studio* studio);
+void studio_delete(Studio* studio);
+const StudioConfig* studio_config(Studio* studio);
 
-} Studio;
-
-Studio* studioInit(s32 argc, char **argv, s32 samplerate, const char* appFolder);
+Studio* studio_create(s32 argc, char **argv, s32 samplerate, tic80_pixel_color_format format, const char* appFolder, s32 maxscale, tic_layout keyboardLayout);
 
 #ifdef __cplusplus
 }

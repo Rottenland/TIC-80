@@ -20,13 +20,18 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#include "tic80.h"
+#include "script.h"
+#include "tools.h"
+#include "cart.h"
+
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include <tic80.h>
-#include "api.h"
-#include "tools.h"
-#include "cart.h"
+#if defined(TIC_MODULE_EXT)
+#include <dlfcn.h>
+#endif
 
 static void onTrace(void* data, const char* text, u8 color)
 {
@@ -52,88 +57,81 @@ static void onExit(void* data)
         tic->callback.exit();
 }
 
-static u64 getFreq(void* data)
+tic80* tic80_create(s32 samplerate, tic80_pixel_color_format format)
 {
-    return TIC80_FRAMERATE;
-}
-
-static u64 getCounter(void* data)
-{
-    tic80_local* tic80 = (tic80_local*)data;
-    return tic80->tick_counter;
-}
-
-tic80* tic80_create(s32 samplerate)
-{
-    tic80_local* tic80 = malloc(sizeof(tic80_local));
-
-    if(tic80)
-    {
-        memset(tic80, 0, sizeof(tic80_local));
-
-        tic80->memory = tic_core_create(samplerate);
-        tic80->tic.screen_format = tic80->memory->screen_format;
-
-        return &tic80->tic;
-    }
-
-    return NULL;
+    return &tic_core_create(samplerate, format)->product;
 }
 
 TIC80_API void tic80_load(tic80* tic, void* cart, s32 size)
 {
-    tic80_local* tic80 = (tic80_local*)tic;
+    tic_mem* mem = (tic_mem*)tic;
 
-    tic80->tic.sound.count = tic80->memory->samples.size/sizeof(s16);
-    tic80->tic.sound.samples = tic80->memory->samples.buffer;
+    tic_cart_load(&mem->cart, cart, size);
 
-    tic80->tic.screen = tic80->memory->screen;
-
+    const tic_script* script = tic_get_script(mem);
+    if(script)
     {
-        tic80->tickData.error = onError;
-        tic80->tickData.trace = onTrace;
-        tic80->tickData.exit = onExit;
-        tic80->tickData.data = tic80;
-
-        tic80->tickData.start = 0;
-        tic80->tickData.freq = getFreq;
-        tic80->tickData.counter = getCounter;
-        tic80->tick_counter = 0;
+        tic_api_reset(mem);
     }
 
+#if defined(TIC_MODULE_EXT)
+    else
     {
-        tic_cart_load(&tic80->memory->cart, cart, size);
-        tic_api_reset(tic80->memory);
+        const char* tag = tic_tool_metatag(mem->cart.code.data, "script", NULL);
+        char name[128];
+        sprintf(name, "%s" TIC_MODULE_EXT, tag);
+
+        void* module = dlopen(name, RTLD_NOW | RTLD_LOCAL);
+
+        if(module)
+        {
+            const tic_script* config = dlsym(module, DEF2STR(SCRIPT_CONFIG));
+
+            if(config)
+            {
+                tic_add_script(config);
+                tic_api_reset(mem);
+            }
+            else
+            {
+                dlclose(module);
+            }
+        }
     }
+#endif
 }
 
-TIC80_API void tic80_tick(tic80* tic, const tic80_input* input)
+TIC80_API void tic80_tick(tic80* tic, tic80_input input, CounterCallback counter, FreqCallback freq)
 {
-    tic80_local* tic80 = (tic80_local*)tic;
+    tic_mem* mem = (tic_mem*)tic;
 
-    tic80->memory->screen_format = tic80->tic.screen_format;
-    tic80->memory->ram.input = *input;
-    
-    tic_core_tick_start(tic80->memory);
-    tic_core_tick(tic80->memory, &tic80->tickData);
-    tic_core_tick_end(tic80->memory);
+    mem->ram->input = input;
 
-    tic_core_blit(tic80->memory);
+    tic_tick_data tickData = (tic_tick_data)
+    {
+        .error = onError,
+        .trace = onTrace,
+        .exit = onExit,
+        .data = tic,
+        .start = 0,
+        .counter = counter,
+        .freq = freq
+    };
 
-    tic80->tick_counter++;
+    tic_core_tick_start(mem);
+    tic_core_tick(mem, &tickData);
+    tic_core_tick_end(mem);
+    tic_core_blit(mem);
 }
 
 TIC80_API void tic80_sound(tic80* tic)
 {
-    tic80_local* tic80 = (tic80_local*)tic;
-    tic_core_synth_sound(tic80->memory);
+    tic_mem* mem = (tic_mem*)tic;
+    tic_core_synth_sound(mem);
 }
 
 TIC80_API void tic80_delete(tic80* tic)
 {
-    tic80_local* tic80 = (tic80_local*)tic;
-
-    tic_core_close(tic80->memory);
-
-    free(tic80);
+    tic_mem* mem = (tic_mem*)tic;
+    tic_core_close(mem);
 }

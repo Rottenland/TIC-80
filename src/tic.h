@@ -22,11 +22,13 @@
 
 #pragma once
 
+#include "retro_endianness.h"
 #include "tic80.h"
 #include "defines.h"
 
 #define TIC_VRAM_SIZE (16*1024) //16K
 #define TIC_RAM_SIZE (TIC_VRAM_SIZE+80*1024) //16K+80K
+#define TIC_WASM_PAGE_COUNT 4 // 256K
 #define TIC_FONT_WIDTH 6
 #define TIC_FONT_HEIGHT 6
 #define TIC_ALTFONT_WIDTH 4
@@ -61,7 +63,6 @@
 #define TIC_SAVEID_SIZE 64
 
 #define TIC_SOUND_CHANNELS 4
-#define TIC_STEREO_CHANNELS 2
 #define SFX_TICKS 30
 #define SFX_COUNT_BITS 6
 #define SFX_COUNT (1 << SFX_COUNT_BITS)
@@ -78,8 +79,7 @@
 #define TRACK_PATTERN_MASK ((1 << TRACK_PATTERN_BITS) - 1)
 #define TRACK_PATTERNS_SIZE (TRACK_PATTERN_BITS * TIC_SOUND_CHANNELS / BITS_IN_BYTE)
 #define MUSIC_FRAMES 16
-#define MUSIC_TRACKS_BITS 3
-#define MUSIC_TRACKS (1 << MUSIC_TRACKS_BITS)
+#define MUSIC_TRACKS 8
 #define DEFAULT_TEMPO 150
 #define DEFAULT_SPEED 6
 #define PITCH_DELTA 128
@@ -91,6 +91,7 @@
 #define WAVE_VALUE_BITS 4
 #define WAVE_MAX_VALUE ((1 << WAVE_VALUE_BITS) - 1)
 #define WAVE_SIZE (WAVE_VALUES * WAVE_VALUE_BITS / BITS_IN_BYTE)
+#define TIC_PCM_SIZE 128
 
 #define TIC_BANKSIZE_BITS 16
 #define TIC_BANK_SIZE (1 << TIC_BANKSIZE_BITS) // 64K
@@ -98,7 +99,11 @@
 #define TIC_BANKS (1 << TIC_BANK_BITS)
 
 #define TIC_CODE_SIZE (TIC_BANK_SIZE * TIC_BANKS)
+#define TIC_BINARY_BANKS 4
+#define TIC_BINARY_SIZE (TIC_BINARY_BANKS * TIC_BANK_SIZE) // 4 * 64k = 256K
 
+
+#define TIC_BUTTONS 8
 #define TIC_GAMEPADS (sizeof(tic80_gamepads) / sizeof(tic80_gamepad))
 
 #define SFX_NOTES {"C-", "C#", "D-", "D#", "E-", "F-", "F#", "G-", "G#", "A-", "A#", "B-"}
@@ -137,9 +142,9 @@ typedef enum
 
 typedef enum
 {
-    tic_no_flip = 0b00,
-    tic_horz_flip = 0b01,
-    tic_vert_flip = 0b10,
+    tic_no_flip = 0,
+    tic_horz_flip = 1,
+    tic_vert_flip = 2,
 } tic_flip;
 
 typedef enum
@@ -159,23 +164,45 @@ typedef enum
 
 typedef struct
 {
+#if RETRO_IS_BIG_ENDIAN
+    u8 size:4;
+    u8 start:4;
+#else
     u8 start:4;
     u8 size:4;
+#endif
 } tic_sound_loop;
 
 typedef struct
 {
-    
+
     struct
     {
+#if RETRO_IS_BIG_ENDIAN
+        u8 wave:4;
+        u8 volume:4;
+        s8 pitch:4;
+        u8 chord:4;
+#else
         u8 volume:4;
         u8 wave:4;
         u8 chord:4;
         s8 pitch:4;
+#endif
     } data[SFX_TICKS];
 
     struct
     {
+#if RETRO_IS_BIG_ENDIAN
+        u8 reverse:1; // chord reverse
+        s8 speed:SFX_SPEED_BITS;
+        u8 pitch16x:1; // pitch factor
+        u8 octave:3;
+        u8 temp:2;
+        u8 stereo_right:1;
+        u8 stereo_left:1;
+        u8 note:4;
+#else
         u8 octave:3;
         u8 pitch16x:1; // pitch factor
         s8 speed:SFX_SPEED_BITS;
@@ -184,6 +211,7 @@ typedef struct
         u8 stereo_left:1;
         u8 stereo_right:1;
         u8 temp:2;
+#endif
     };
 
     union
@@ -248,6 +276,15 @@ typedef enum
 
 typedef struct
 {
+#if RETRO_IS_BIG_ENDIAN
+    u8 param1   :4;
+    u8 note     :4;
+    u8 sfxhi    :1;
+    u8 command  :MUSIC_CMD_BITS; // tic_music_command
+    u8 param2   :4;
+    u8 octave   :3;
+    u8 sfxlow   :MUSIC_SFXID_LOW_BITS;
+#else
     u8 note     :4;
     u8 param1   :4;
     u8 param2   :4;
@@ -255,7 +292,7 @@ typedef struct
     u8 sfxhi    :1;
     u8 sfxlow   :MUSIC_SFXID_LOW_BITS;
     u8 octave   :3;
-
+#endif
 } tic_track_row;
 
 typedef struct
@@ -316,13 +353,20 @@ typedef struct
         s8 frame;
         s8 row;
     } music;
-    
+
     struct
     {
+#if RETRO_IS_BIG_ENDIAN
+        u8 unknown:4;
+        u8 music_sustain:1;
+        u8 music_status:2; // enum tic_music_status
+        u8 music_loop:1;
+#else
         u8 music_loop:1;
         u8 music_status:2; // enum tic_music_status
         u8 music_sustain:1;
         u8 unknown:4;
+#endif
     } flag;
 
 } tic_music_state;
@@ -331,6 +375,19 @@ typedef union
 {
     struct
     {
+#if RETRO_IS_BIG_ENDIAN
+        u8 right4:4;
+        u8 left4:4;
+
+        u8 right3:4;
+        u8 left3:4;
+
+        u8 right2:4;
+        u8 left2:4;
+
+        u8 right1:4;
+        u8 left1:4;
+#else
         u8 left1:4;
         u8 right1:4;
 
@@ -342,6 +399,7 @@ typedef union
 
         u8 left4:4;
         u8 right4:4;
+#endif
     };
 
     u32 data;
@@ -351,12 +409,30 @@ typedef struct
 {
     struct
     {
-        u16 freq:12;
-        u16 volume:4;
+	u8 freq_low;
+#if RETRO_IS_BIG_ENDIAN
+        u8 volume:4;
+        u8 freq_high:4;
+#else
+        u8 freq_high:4;
+        u8 volume:4;
+#endif
     };
 
     tic_waveform waveform;
 } tic_sound_register;
+
+
+static INLINE u16 tic_sound_register_get_freq(const tic_sound_register* reg)
+{
+    return (reg->freq_high << 8) | reg->freq_low;
+}
+
+static INLINE void tic_sound_register_set_freq(tic_sound_register* reg, u16 val)
+{
+    reg->freq_low = val;
+    reg->freq_high = val >> 8;
+}
 
 typedef struct
 {
@@ -368,10 +444,16 @@ typedef struct
     u8 data[TIC_SPRITESIZE * TIC_SPRITESIZE * TIC_PALETTE_BPP / BITS_IN_BYTE];
 } tic_tile;
 
-typedef union
+typedef struct
 {
     char data[TIC_CODE_SIZE];
 } tic_code;
+
+typedef struct
+{
+    char data[TIC_BINARY_SIZE];
+    u32 size;
+} tic_binary;
 
 typedef struct
 {
@@ -433,7 +515,9 @@ typedef struct
         tic_bank banks[TIC_BANKS];
     };
 
-    tic_code code;    
+    tic_code code;
+    tic_binary binary;
+    u8 lang;
 
 } tic_cartridge;
 
@@ -471,10 +555,25 @@ typedef union
         {
             union
             {
-                u8 border:TIC_PALETTE_BPP;
-
+		struct {
+#if RETRO_IS_BIG_ENDIAN
+		    u8 padding_border:4;
+		    u8 border:TIC_PALETTE_BPP;
+#else
+		    u8 border:TIC_PALETTE_BPP;
+		    u8 padding_border:4;
+#endif
+		};
                 // clear color for the BANK1
-                u8 clear:TIC_PALETTE_BPP;
+		struct {
+#if RETRO_IS_BIG_ENDIAN
+		    u8 padding_clear:4;
+		    u8 clear:TIC_PALETTE_BPP;
+#else
+		    u8 clear:TIC_PALETTE_BPP;
+		    u8 padding_clear:4;
+#endif
+		};
             };
 
             struct
@@ -485,20 +584,30 @@ typedef union
 
             struct
             {
+#if RETRO_IS_BIG_ENDIAN
+                u8 system:1;
                 u8 sprite:7;
-                bool system:1;
+#else
+                u8 sprite:7;
+                u8 system:1;
+#endif
             } cursor;
         } vars;
 
         struct
         {
+#if RETRO_IS_BIG_ENDIAN
+            u8 reserved:4;
+            u8 segment:4;
+#else
             u8 segment:4;
             u8 reserved:4;
+#endif
         } blit;
 
         u8 reserved[3];
     };
-    
+
     u8 data[TIC_VRAM_SIZE];
 } tic_vram;
 
@@ -509,8 +618,13 @@ typedef struct
 
 typedef struct
 {
-    u8 data[sizeof(tic80_gamepads) * BITS_IN_BYTE];
+    u8 data[TIC_GAMEPADS * TIC_BUTTONS];
 } tic_mapping;
+
+typedef struct
+{
+    u8 data[TIC_PCM_SIZE];
+} tic_pcm;
 
 typedef union
 {
@@ -531,6 +645,7 @@ typedef union
         tic_flags           flags;
         tic_font            font;
         tic_mapping         mapping;
+        tic_pcm             pcm;
 
         u8 free;
     };
@@ -592,7 +707,7 @@ typedef enum
     tic_key_comma,
     tic_key_period,
     tic_key_slash,
-    
+
     tic_key_space,
     tic_key_tab,
 
@@ -628,6 +743,23 @@ typedef enum
     tic_key_f10,
     tic_key_f11,
     tic_key_f12,
+
+    tic_key_numpad0,
+    tic_key_numpad1,
+    tic_key_numpad2,
+    tic_key_numpad3,
+    tic_key_numpad4,
+    tic_key_numpad5,
+    tic_key_numpad6,
+    tic_key_numpad7,
+    tic_key_numpad8,
+    tic_key_numpad9,
+    tic_key_numpadplus,
+    tic_key_numpadminus,
+    tic_key_numpadmultiply,
+    tic_key_numpaddivide,
+    tic_key_numpadenter,
+    tic_key_numpadperiod,
 
     ////////////////
 

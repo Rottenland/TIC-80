@@ -9,7 +9,7 @@ x=120
 y=120
 
 particle = {}
-palete = {14,9,6,3,10,15}
+palette = {14,9,6,3,10,15}
 
 function addParticle(x,y)
  local p = {}
@@ -21,7 +21,7 @@ function addParticle(x,y)
 	table.insert(particle,p)
 end
 
-function ticParticle()	
+function ticParticle()
 	--print("#"..#particle)
 	local s=0
 	local s2=0
@@ -30,7 +30,7 @@ function ticParticle()
 		p.t = p.t + 1
 		s = math.log(p.t / 2.0)
 		s2 = s/2.0
-		c = palete[math.ceil(p.t/70)]
+		c = palette[math.ceil(p.t/70)]
 	 p.x = p.x + p.dx
 		p.y = p.y + p.dy
 
@@ -39,8 +39,8 @@ function ticParticle()
 		--remove old ones
 		if p.t > 300 then
 			table.remove(particle,k)
-		end		
-	end		
+		end
+	end
 end
 
 function TIC()
@@ -48,28 +48,28 @@ function TIC()
 	if btn(0) then y=y-1 end
 	if btn(1) then y=y+1 end
 	if btn(2) then x=x-1 end
-	if btn(3) then x=x+1 end	
+	if btn(3) then x=x+1 end
 	
 	--warp space
 	x = x % 240
 	y = y % 136
 	
 	--reset
-	if btn(4) then 
+	if btn(4) then
 			x = 120
 			y = 120
 	end
 	
-	addParticle(x,y)		
-	addParticle(30,130)		
- addParticle(210,130)		
+	addParticle(x,y)
+	addParticle(30,130)
+ addParticle(210,130)
 
 	cls(8)
 
-	--Update & Draw particles	
+	--Update & Draw particles
 	ticParticle()
 
-	--cursor	
+	--cursor
 	pix(x,y,7)
 	
 	print("! FIRE !",94,64)

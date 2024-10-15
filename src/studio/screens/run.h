@@ -22,24 +22,26 @@
 
 #pragma once
 
+#include "../system.h"
 #include "studio/studio.h"
 
 typedef struct Run Run;
 
 struct Run
 {
+    Studio* studio;
     tic_mem* tic;
     struct Console* console;
     struct tic_fs* fs;
     tic_tick_data tickData;
 
     bool exit;
-    
+
     char saveid[TICNAME_MAX];
     tic_persistent pmem;
 
     void(*tick)(Run*);
 };
 
-void initRun(Run*, struct Console*, struct tic_fs* , tic_mem*);
+void initRun(Run*, struct Console*, struct tic_fs*, Studio* studio);
 void freeRun(Run* run);

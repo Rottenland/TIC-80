@@ -30,9 +30,11 @@
 
 #include "tic.h"
 #include "api.h"
+#include "script.h"
 #include "defines.h"
 #include "tools.h"
 #include "system.h"
+#include "anim.h"
 #include "ext/png.h"
 
 #define KEYBOARD_HOLD 20
@@ -48,6 +50,7 @@
 #define STUDIO_TEXT_BUFFER_WIDTH (TIC80_WIDTH / STUDIO_TEXT_WIDTH)
 #define STUDIO_TEXT_BUFFER_HEIGHT (TIC80_HEIGHT / STUDIO_TEXT_HEIGHT)
 #define STUDIO_TEXT_BUFFER_SIZE (STUDIO_TEXT_BUFFER_WIDTH * STUDIO_TEXT_BUFFER_HEIGHT)
+#define STUDIO_ANIM_TIME 8
 
 #define TIC_COLOR_BG tic_color_black
 
@@ -65,25 +68,25 @@
 #endif
 
 #define CMD_PARAMS_LIST(macro)                                                              \
-    macro(skip,         bool,   BOOLEAN,    "",         "skip startup animation")           \
+    macro(skip,         int,    BOOLEAN,    "",         "skip startup animation")           \
     macro(volume,       s32,    INTEGER,    "=<int>",   "global volume value [0-15]")       \
-    macro(cli,          bool,   BOOLEAN,    "",         "console only output")              \
-    macro(fullscreen,   bool,   BOOLEAN,    "",         "enable fullscreen mode")           \
-    macro(vsync,        bool,   BOOLEAN,    "",         "enable VSYNC")                     \
-    macro(soft,         bool,   BOOLEAN,    "",         "use software rendering")           \
+    macro(cli,          int,    BOOLEAN,    "",         "console only output")              \
+    macro(fullscreen,   int,    BOOLEAN,    "",         "enable fullscreen mode")           \
+    macro(vsync,        int,    BOOLEAN,    "",         "enable VSYNC")                     \
+    macro(soft,         int,    BOOLEAN,    "",         "use software rendering")           \
     macro(fs,           char*,  STRING,     "=<str>",   "path to the file system folder")   \
     macro(scale,        s32,    INTEGER,    "=<int>",   "main window scale")                \
     macro(cmd,          char*,  STRING,     "=<str>",   "run commands in the console")      \
-    macro(keepcmd,      bool,   BOOLEAN,    "",         "re-execute commands on every run") \
-    macro(version,      bool,   BOOLEAN,    "",         "print program version")            \
+    macro(keepcmd,      int,    BOOLEAN,    "",         "re-execute commands on every run") \
+    macro(version,      int,    BOOLEAN,    "",         "print program version")            \
     CRT_CMD_PARAM(macro)
 
-#define SHOW_TOOLTIP(FORMAT, ...)           \
+#define SHOW_TOOLTIP(STUDIO, FORMAT, ...)   \
 do{                                         \
     static const char Format[] = FORMAT;    \
     static char buf[sizeof Format];         \
     sprintf(buf, Format, __VA_ARGS__);      \
-    showTooltip(buf);                       \
+    showTooltip(STUDIO, buf);               \
 }while(0)
 
 typedef struct
@@ -92,6 +95,20 @@ typedef struct
 #define CMD_PARAMS_DEF(name, ctype, type, post, help) ctype name;
     CMD_PARAMS_LIST(CMD_PARAMS_DEF)
 #undef  CMD_PARAMS_DEF
+
+#if defined(BUILD_EDITORS)
+    const char *codeexport;
+    const char *codeimport;
+    s32 delay;
+    s32 lowerlimit;
+    s32 upperlimit;
+    s32 battletime;
+
+    int fft;
+    int fftlist;
+    int fftcaptureplaybackdevices;
+    const char *fftdevice;
+#endif
 } StartArgs;
 
 typedef enum
@@ -110,6 +127,15 @@ typedef enum
 
     TIC_MODES_COUNT
 } EditorMode;
+
+typedef enum
+{
+    VI_NORMAL,
+    VI_INSERT,
+    VI_SELECT,
+    VI_SEEK,
+    VI_SEEK_BACK,
+} ViMode;
 
 enum
 {
@@ -170,29 +196,34 @@ enum
     tic_icon_bigpicker  = 134,
     tic_icon_bigselect  = 135,
     tic_icon_bigfill    = 136,
+    tic_icon_loop       = 137,
 };
 
-void setCursor(tic_cursor id);
+void setCursor(Studio* studio, tic_cursor id);
 
-bool checkMousePos(const tic_rect* rect);
-bool checkMouseClick(const tic_rect* rect, tic_mouse_btn button);
-bool checkMouseDown(const tic_rect* rect, tic_mouse_btn button);
+bool checkMousePos(Studio* studio, const tic_rect* rect);
+bool checkMouseClick(Studio* studio, const tic_rect* rect, tic_mouse_btn button);
+bool checkMouseDblClick(Studio* studio, const tic_rect* rect, tic_mouse_btn button);
+bool checkMouseDown(Studio* studio, const tic_rect* rect, tic_mouse_btn button);
 
-void drawToolbar(tic_mem* tic, bool bg);
-void drawBitIcon(s32 id, s32 x, s32 y, u8 color);
+void drawToolbar(Studio* studio, tic_mem* tic, bool bg);
+void drawBitIcon(Studio* studio, s32 id, s32 x, s32 y, u8 color);
 
 tic_cartridge* loadPngCart(png_buffer buffer);
-void studioRomLoaded();
-void studioRomSaved();
-void studioConfigChanged();
+void studioRomLoaded(Studio* studio);
+void studioRomSaved(Studio* studio);
+void studioConfigChanged(Studio* studio);
 
-void setStudioMode(EditorMode mode);
-void resumeRunMode();
-EditorMode getStudioMode();
-void exitStudio();
+void setStudioMode(Studio* studio, EditorMode mode);
+EditorMode getStudioMode(Studio* studio);
+void exitStudio(Studio* studio);
+
+void setStudioViMode(Studio* studio, ViMode mode);
+ViMode getStudioViMode(Studio* studio);
+bool checkStudioViMode(Studio* studio, ViMode mode);
 
 void toClipboard(const void* data, s32 size, bool flip);
-bool fromClipboard(void* data, s32 size, bool flip, bool remove_white_spaces);
+bool fromClipboard(void* data, s32 size, bool flip, bool remove_white_spaces, bool sameSize);
 
 typedef enum
 {
@@ -202,7 +233,7 @@ typedef enum
     TIC_CLIPBOARD_PASTE,
 } ClipboardEvent;
 
-ClipboardEvent getClipboardEvent();
+ClipboardEvent getClipboardEvent(Studio* studio);
 
 typedef enum
 {
@@ -213,43 +244,90 @@ typedef enum
     TIC_TOOLBAR_REDO,
 } StudioEvent;
 
-void setStudioEvent(StudioEvent event);
-void showTooltip(const char* text);
+void setStudioEvent(Studio* studio, StudioEvent event);
+void showTooltip(Studio* studio, const char* text);
 
 void setSpritePixel(tic_tile* tiles, s32 x, s32 y, u8 color);
 u8 getSpritePixel(tic_tile* tiles, s32 x, s32 y);
 
-typedef void(*ConfirmCallback)(bool yes, void* data);
-void confirmDialog(const char** text, s32 rows, ConfirmCallback callback, void* data);
+typedef void(*ConfirmCallback)(Studio* studio, bool yes, void* data);
+void confirmDialog(Studio* studio, const char** text, s32 rows, ConfirmCallback callback, void* data);
+void confirmLoadCart(Studio* studio, ConfirmCallback callback, void* data);
 
-bool studioCartChanged();
-void playSystemSfx(s32 id);
+bool studioCartChanged(Studio* studio);
+void playSystemSfx(Studio* studio, s32 id);
 
-void runGameFromSurf();
-void gotoCode();
-void gotoSurf();
+void gotoMenu(Studio* studio);
+void gotoCode(Studio* studio);
+void gotoSurf(Studio* studio);
 
-void showGameMenu();
-void runProject();
+void runGame(Studio* studio);
+void exitGame(Studio* studio);
+void resumeGame(Studio* studio);
+void saveProject(Studio* studio);
 
-tic_tiles* getBankTiles();
-tic_palette* getBankPalette(bool bank);
-tic_flags* getBankFlags();
-tic_map* getBankMap();
+tic_tiles* getBankTiles(Studio* studio);
+tic_palette* getBankPalette(Studio* studio, bool bank);
+tic_flags* getBankFlags(Studio* studio);
+tic_map* getBankMap(Studio* studio);
 
-char getKeyboardText();
-bool keyWasPressed(tic_key key);
-bool anyKeyWasPressed();
+char getKeyboardText(Studio* studio);
+bool keyWasPressed(Studio* studio, tic_key key);
+bool enterWasPressed(Studio* studio);
+bool anyKeyWasPressed(Studio* studio);
+bool ticEnterWasPressed(tic_mem* tic, s32 hold, s32 period);
 
-const StudioConfig* getConfig();
-struct Start* getStartScreen();
-struct Sprite* getSpriteEditor();
+const StudioConfig* getConfig(Studio* studio);
+struct Start* getStartScreen(Studio* studio);
+struct Sprite* getSpriteEditor(Studio* studio);
+
+const char* studioExportMusic(Studio* studio, s32 track, s32 bank, const char* filename);
+const char* studioExportSfx(Studio* studio, s32 sfx, const char* filename);
+
+tic_mem* getMemory(Studio* studio);
 
 const char* md5str(const void* data, s32 length);
 void sfx_stop(tic_mem* tic, s32 channel);
-const char* studioExportMusic(s32 track, const char* filename);
-const char* studioExportSfx(s32 sfx, const char* filename);
 s32 calcWaveAnimation(tic_mem* tic, u32 index, s32 channel);
 void map2ram(tic_ram* ram, const tic_map* src);
 void tiles2ram(tic_ram* ram, const tic_tiles* src);
 void fadePalette(tic_palette* pal, s32 value);
+bool project_ext(const char* name);
+
+#if defined(BUILD_EDITORS)
+
+typedef struct
+{
+    char* exp;
+    char* imp;
+
+    struct
+    {
+        tic_code code;
+        char postag[32];
+    } last;
+
+    s32 delay;
+    s32 ticks;
+
+    struct
+    {
+        s32 lower;
+        s32 upper;
+        s32 current;
+    } limit;
+
+    struct
+    {
+        s32 started;
+        s32 time;
+        s32 left;
+
+        bool hidetime;
+    } battle;
+
+} Bytebattle;
+
+Bytebattle* getBytebattle(Studio* studio);
+
+#endif

@@ -177,7 +177,7 @@ bool n3ds_key_touched(touchPosition* pos, const touch_area_t* area)
 		state[(tickey)] = true; \
 	}
 
-void n3ds_keyboard_update(tic_n3ds_keyboard *kbd, tic_mem *tic) {
+void n3ds_keyboard_update(tic_n3ds_keyboard *kbd, tic80_input* input) {
 	u32 key_down, key_up, key_held;
 	touchPosition touch;
 	const touch_area_t* area;
@@ -185,7 +185,7 @@ void n3ds_keyboard_update(tic_n3ds_keyboard *kbd, tic_mem *tic) {
 	bool state[tic_keys_count];
 	int i, j;
 
-	tic80_keyboard *tic_kbd = &tic->ram.input.keyboard;
+	tic80_keyboard *tic_kbd = &input->keyboard;
 
 	memset(&state, 0, sizeof(state));
 	key_down = hidKeysDown();
@@ -254,7 +254,7 @@ void n3ds_keyboard_update(tic_n3ds_keyboard *kbd, tic_mem *tic) {
 	if (changed) {
 		// apply to TIC-80
 		kbd->render_dirty = true;
-		
+
 		tic_kbd->data = 0;
 		int buffer_pos = 0;
 		for(i = 0; i < kbd->kd_count && buffer_pos < TIC80_KEY_BUFFER; i++)
@@ -278,9 +278,9 @@ void n3ds_keyboard_update(tic_n3ds_keyboard *kbd, tic_mem *tic) {
 	}
 }
 
-void n3ds_gamepad_update(tic_n3ds_keyboard *kbd, tic_mem *tic) {
-	tic80_gamepads *tic_pad = &tic->ram.input.gamepads;
-	tic80_mouse *tic_mouse = &tic->ram.input.mouse;
+void n3ds_gamepad_update(tic_n3ds_keyboard *kbd, tic80_input* input) {
+	tic80_gamepads *tic_pad = &input->gamepads;
+	tic80_mouse *tic_mouse = &input->mouse;
 	u32 key_held = hidKeysHeld();
 	u64 curr_clock = svcGetSystemTick();
 	circlePosition cstick;
@@ -299,8 +299,8 @@ void n3ds_gamepad_update(tic_n3ds_keyboard *kbd, tic_mem *tic) {
 	// mouse scroll
 	tic_mouse->scrollx = 0;
 	tic_mouse->scrolly = 0;
-	
-	if (curr_clock >= kbd->scroll_debounce) {		
+
+	if (curr_clock >= kbd->scroll_debounce) {
 		if(key_held & KEY_CSTICK_UP)
 			tic_mouse->scrolly = 1;
 		else if(key_held & KEY_CSTICK_DOWN)

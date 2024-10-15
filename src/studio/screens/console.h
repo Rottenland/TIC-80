@@ -23,8 +23,7 @@
 #pragma once
 
 #include "studio/studio.h"
-
-typedef void(*fs_done_callback)(void* data);
+#include "studio/fs.h"
 
 typedef enum
 {
@@ -70,6 +69,7 @@ struct Console
         size_t pos;
     } input;
 
+    Studio* studio;
     tic_mem* tic;
 
     struct tic_fs* fs;
@@ -91,9 +91,8 @@ struct Console
     u32 tickCounter;
 
     bool active;
-    bool showGameMenu;
     StartArgs args;
-    
+
     struct
     {
         s32 count;
@@ -115,5 +114,6 @@ struct Console
     CartSaveResult(*save)(Console*);
 };
 
-void initConsole(Console*, tic_mem*, struct tic_fs* fs, struct tic_net* net, struct Config* config, StartArgs args);
+void initConsole(Console*, Studio* studio, struct tic_fs* fs, struct tic_net* net, struct Config* config, StartArgs args);
 void freeConsole(Console* console);
+void forceAutoSave(Console* console, const char* cart_name);

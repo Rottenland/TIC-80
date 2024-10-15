@@ -23,205 +23,62 @@
 #include "config.h"
 #include "fs.h"
 #include "cart.h"
+#include "ext/json.h"
 
-#if defined (TIC_BUILD_WITH_LUA)
-#include <lua.h>
-#include <lauxlib.h>
-#include <lualib.h>
-
-static void readBool(lua_State* lua, const char* name, bool* val)
-{
-    lua_getfield(lua, -1, name);
-
-    if (lua_isboolean(lua, -1))
-        *val = lua_toboolean(lua, -1);
-
-    lua_pop(lua, 1);
-}
-
-static void readInteger(lua_State* lua, const char* name, s32* val)
-{
-    lua_getfield(lua, -1, name);
-
-    if (lua_isinteger(lua, -1))
-        *val = lua_tointeger(lua, -1);
-
-    lua_pop(lua, 1);
-}
-
-static void readByte(lua_State* lua, const char* name, u8* val)
-{
-    s32 res = *val;
-    readInteger(lua, name, &res);
-    *val = res;
-}
-
-static void readGlobalInteger(lua_State* lua, const char* name, s32* val)
-{
-    lua_getglobal(lua, name);
-
-    if (lua_isinteger(lua, -1))
-        *val = lua_tointeger(lua, -1);
-
-    lua_pop(lua, 1);
-}
-
-static void readGlobalBool(lua_State* lua, const char* name, bool* val)
-{
-    lua_getglobal(lua, name);
-
-    if (lua_isboolean(lua, -1))
-        *val = lua_toboolean(lua, -1);
-
-    lua_pop(lua, 1);
-}
-
-#if defined(CRT_SHADER_SUPPORT)
-
-static void readString(lua_State* lua, const char* name, const char** val)
-{
-    lua_getfield(lua, -1, name);
-
-    if (lua_isstring(lua, -1))
-        *val = strdup(lua_tostring(lua, -1));
-
-    lua_pop(lua, 1);
-}
-
-static void readConfigCrtShader(Config* config, lua_State* lua)
-{
-    lua_getglobal(lua, "CRT_SHADER");
-
-    if(lua_type(lua, -1) == LUA_TTABLE)
-    {
-        readString(lua, "VERTEX", &config->data.shader.vertex);
-        readString(lua, "PIXEL", &config->data.shader.pixel);
-    }
-
-#if defined (EMSCRIPTEN)
-    // WebGL supports only version 100 shaders.
-    // Luckily, the format is nearly identical.
-    // This code detects the incompatible line(s) at
-    // the beginning of each shader and patches them
-    // in-place in memory.
-    char *s = (char *)config->data.shader.vertex;
-    if (strncmp("\t\t#version 110", s, 14) == 0) {
-        // replace the two tabs, with a "//" comment, disabling the #version tag.
-        s[0] = '/';
-        s[1] = '/';
-    }
-    s = (char *)config->data.shader.pixel;
-    if (strncmp("\t\t#version 110\n\t\t//precision highp float;", s, 41) == 0) {
-        // replace the two tabs, with a "//" comment, disabling the #version tag.
-        s[0] = '/';
-        s[1] = '/';
-        // replace the "//" comment with spaces, enabling the precision statement.
-        s[17] = ' ';
-        s[18] = ' ';
-    }
+#if defined(__EMSCRIPTEN__)
+#define DEFAULT_VSYNC 0
+#else
+#define DEFAULT_VSYNC 1
 #endif
 
-    lua_pop(lua, 1);        
-}
-
+#if defined(__TIC_ANDROID__)
+#define INTEGER_SCALE_DEFAULT false
+#else
+#define INTEGER_SCALE_DEFAULT true
 #endif
 
-static void readCodeTheme(Config* config, lua_State* lua)
+#define JSON(...) #__VA_ARGS__
+
+static void readConfig(Config* config)
 {
-    lua_getfield(lua, -1, "CODE");
+    const char* json = config->cart->code.data;
 
-    if(lua_type(lua, -1) == LUA_TTABLE)
+    if(json_parse(json, strlen(json)))
     {
+        config->data.checkNewVersion = json_bool("CHECK_NEW_VERSION", 0);
+        config->data.uiScale = json_int("UI_SCALE", 0);
+        config->data.soft = json_bool("SOFTWARE_RENDERING", 0);
+        config->data.trim = json_bool("TRIM_ON_SAVE", 0);
 
-#define CODE_COLOR_DEF(VAR) readByte(lua, #VAR, &config->data.theme.code.VAR);
+        if(config->data.uiScale <= 0)
+            config->data.uiScale = 1;
+
+        config->data.theme.gamepad.touch.alpha = json_int("GAMEPAD_TOUCH_ALPHA", 0);
+
+        s32 theme = json_object("CODE_THEME", 0);
+
+#define CODE_COLOR_DEF(VAR) config->data.theme.code.VAR = json_int(#VAR, theme);
         CODE_COLORS_LIST(CODE_COLOR_DEF)
 #undef  CODE_COLOR_DEF
 
-        readByte(lua, "SELECT", &config->data.theme.code.select);
-        readByte(lua, "CURSOR", &config->data.theme.code.cursor);
+        config->data.theme.code.select = json_int("SELECT", theme);
+        config->data.theme.code.cursor = json_int("CURSOR", theme);
 
-        readBool(lua, "SHADOW", &config->data.theme.code.shadow);
-        readBool(lua, "ALT_FONT", &config->data.theme.code.altFont);
-        readBool(lua, "MATCH_DELIMITERS", &config->data.theme.code.matchDelimiters);
-    }
+        config->data.theme.code.shadow = json_bool("SHADOW", theme);
+        config->data.theme.code.altFont = json_bool("ALT_FONT", theme);
+        config->data.theme.code.altCaret = json_bool("ALT_CARET", theme);
+        config->data.theme.code.matchDelimiters = json_bool("MATCH_DELIMITERS", theme);
+        config->data.theme.code.autoDelimiters = json_bool("AUTO_DELIMITERS", theme);
 
-    lua_pop(lua, 1);
-}
-
-static void readGamepadTheme(Config* config, lua_State* lua)
-{
-    lua_getfield(lua, -1, "GAMEPAD");
-
-    if(lua_type(lua, -1) == LUA_TTABLE)
-    {
-        lua_getfield(lua, -1, "TOUCH");
-
-        if(lua_type(lua, -1) == LUA_TTABLE)
-        {
-            readByte(lua, "ALPHA", &config->data.theme.gamepad.touch.alpha);
-        }
-
-        lua_pop(lua, 1);
-    }
-
-    lua_pop(lua, 1);
-}
-
-static void readTheme(Config* config, lua_State* lua)
-{
-    lua_getglobal(lua, "THEME");
-
-    if(lua_type(lua, -1) == LUA_TTABLE)
-    {
-        readCodeTheme(config, lua);
-        readGamepadTheme(config, lua);
-    }
-
-    lua_pop(lua, 1);
-}
-
-static void readConfig(Config* config)
-{
-    lua_State* lua = luaL_newstate();
-
-    if(lua)
-    {
-        if(luaL_loadstring(lua, config->cart->code.data) == LUA_OK && lua_pcall(lua, 0, LUA_MULTRET, 0) == LUA_OK)
-        {
-            readGlobalInteger(lua,  "GIF_LENGTH",           &config->data.gifLength);
-            readGlobalInteger(lua,  "GIF_SCALE",            &config->data.gifScale);
-            readGlobalBool(lua,     "CHECK_NEW_VERSION",    &config->data.checkNewVersion);
-            readGlobalInteger(lua,  "UI_SCALE",             &config->data.uiScale);
-            readGlobalBool(lua,     "SOFTWARE_RENDERING",   &config->data.soft);
-
-#if defined(CRT_SHADER_SUPPORT)
-            readConfigCrtShader(config, lua);
-#endif
-            readTheme(config, lua);
-        }
-
-        lua_close(lua);
     }
 }
-#else
-
-static void readConfig(Config* config)
-{
-    config->data = (StudioConfig)
-    {
-        .uiScale = 4,
-        .cart = config->cart,
-    };
-}
-
-#endif
 
 static void update(Config* config, const u8* buffer, s32 size)
 {
     tic_cart_load(config->cart, buffer, size);
 
     readConfig(config);
-    studioConfigChanged();
+    studioConfigChanged(config->studio);
 }
 
 static void setDefault(Config* config)
@@ -229,14 +86,22 @@ static void setDefault(Config* config)
     config->data = (StudioConfig)
     {
         .cart = config->cart,
-        .options = 
+        .uiScale = 4,
+        .options =
         {
 #if defined(CRT_SHADER_SUPPORT)
-            .crt        = false,
+            .crt            = false,
 #endif
-            .volume     = MAX_VOLUME,
-            .vsync      = true,
-            .fullscreen = false,
+            .volume         = MAX_VOLUME,
+            .vsync          = DEFAULT_VSYNC,
+            .fullscreen     = false,
+            .integerScale   = INTEGER_SCALE_DEFAULT,
+            .autosave       = false,
+#if defined(BUILD_EDITORS)
+            .keybindMode    = KEYBIND_STANDARD,
+            .tabMode        = TAB_AUTO,
+            .tabSize        = 1,
+#endif
         },
     };
 
@@ -283,26 +148,58 @@ static void save(Config* config)
     readConfig(config);
     saveConfig(config, true);
 
-    studioConfigChanged();
+    studioConfigChanged(config->studio);
 }
 
-static const char OptionsDatPath[] = TIC_LOCAL_VERSION "options.dat";
+static const char OptionsJsonPath[] = TIC_LOCAL "options.json";
 
-static void loadConfigData(tic_fs* fs, const char* path, void* dst, s32 size)
+typedef struct
 {
-    s32 dataSize = 0;
-    u8* data = (u8*)tic_fs_loadroot(fs, path, &dataSize);
+    char data[1024];
+} string;
+
+static void loadOptions(Config* config)
+{
+    s32 size;
+    u8* data = (u8*)tic_fs_loadroot(config->fs, OptionsJsonPath, &size);
 
     if(data) SCOPE(free(data))
-        if(dataSize == size)
-            memcpy(dst, data, size);
+    {
+        string json;
+        snprintf(json.data, sizeof json, "%.*s", size, data);
+
+        if(json_parse(json.data, strlen(json.data)))
+        {
+            struct StudioOptions* options = &config->data.options;
+
+#if defined(CRT_SHADER_SUPPORT)
+            options->crt = json_bool("crt", 0);
+#endif
+            options->fullscreen = json_bool("fullscreen", 0);
+            options->vsync = json_bool("vsync", 0);
+            options->integerScale = json_bool("integerScale", 0);
+            options->volume = json_int("volume", 0);
+            options->autosave = json_bool("autosave", 0);
+
+            string mapping;
+            json_string("mapping", 0, mapping.data, sizeof mapping);
+            tic_tool_str2buf(mapping.data, strlen(mapping.data), &options->mapping, false);
+
+#if defined(BUILD_EDITORS)
+            options->keybindMode = json_int("keybindMode", 0);
+            options->tabMode = json_int("tabMode", 0);
+            options->tabSize = json_int("tabSize", 0);
+#endif
+        }
+    }
 }
 
-void initConfig(Config* config, tic_mem* tic, tic_fs* fs)
+void initConfig(Config* config, Studio* studio, tic_fs* fs)
 {
     *config = (Config)
     {
-        .tic = tic,
+        .studio = studio,
+        .tic = getMemory(studio),
         .cart = realloc(config->cart, sizeof(tic_cartridge)),
         .save = save,
         .reset = reset,
@@ -322,25 +219,80 @@ void initConfig(Config* config, tic_mem* tic, tic_fs* fs)
 
             free(data);
         }
-        else saveConfig(config, false);        
+        else saveConfig(config, false);
     }
 
-    loadConfigData(fs, OptionsDatPath, &config->data.options, sizeof config->data.options);
+    loadOptions(config);
 
-    tic_api_reset(tic);
+#if defined(__TIC_LINUX__)
+    // do not load fullscreen option on Linux
+    config->data.options.fullscreen = false;
+#endif
+
+    tic_api_reset(config->tic);
+}
+
+static string data2str(const void* data, s32 size)
+{
+    string res;
+    tic_tool_buf2str(data, size, res.data, false);
+    return res;
+}
+
+static const char* bool2str(bool value)
+{
+    return value ? "true" : "false";
+}
+
+static void saveOptions(Config* config)
+{
+    const struct StudioOptions* options = &config->data.options;
+
+    string buf;
+    sprintf(buf.data, JSON(
+        {
+#if defined(CRT_SHADER_SUPPORT)
+            "crt":%s,
+#endif
+            "fullscreen":%s,
+            "vsync":%s,
+            "integerScale":%s,
+            "volume":%i,
+            "autosave":%s,
+            "mapping":"%s"
+#if defined(BUILD_EDITORS)
+            ,
+            "keybindMode":%i,
+            "tabMode":%i,
+            "tabSize":%i
+#endif
+        })
+        ,
+#if defined(CRT_SHADER_SUPPORT)
+        bool2str(options->crt),
+#endif
+        bool2str(options->fullscreen),
+        bool2str(options->vsync),
+        bool2str(options->integerScale),
+        options->volume,
+        bool2str(options->autosave),
+        data2str(&options->mapping, sizeof options->mapping).data
+
+#if defined(BUILD_EDITORS)
+        ,
+        options->keybindMode,
+        options->tabMode,
+        options->tabSize
+#endif
+        );
+
+    tic_fs_saveroot(config->fs, OptionsJsonPath, buf.data, strlen(buf.data), true);
 }
 
 void freeConfig(Config* config)
 {
-    tic_fs_saveroot(config->fs, OptionsDatPath, &config->data.options, sizeof config->data.options, true);
+    saveOptions(config);
 
     free(config->cart);
-
-#if defined(CRT_SHADER_SUPPORT)
-
-    free((void*)config->data.shader.vertex);
-    free((void*)config->data.shader.pixel);
-#endif
-
     free(config);
 }

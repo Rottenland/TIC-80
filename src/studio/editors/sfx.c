@@ -24,8 +24,11 @@
 #include "ext/history.h"
 
 #define DEFAULT_CHANNEL 0
+#define NOTES 12
+#define SECOND_OCTAVE_KEYBOARD_INDEX 16
+#define SECOND_OCTAVE_KEYBOARD_SHIFT 5
 
-enum 
+enum
 {
     SFX_WAVE_PANEL,
     SFX_VOLUME_PANEL,
@@ -53,15 +56,36 @@ static void drawPanelBorder(tic_mem* tic, s32 x, s32 y, s32 w, s32 h, tic_color 
     tic_api_rect(tic, x+w, y, 1, h, tic_color_light_grey);
 }
 
+static s32 hold(Sfx* sfx, s32 value)
+{
+    tic_mem* tic = sfx->tic;
+
+    if(tic_api_key(tic, tic_key_ctrl) ||
+        tic_api_key(tic, tic_key_shift))
+    {
+        if(sfx->holdValue < 0)
+            sfx->holdValue = value;
+
+        return sfx->holdValue;
+    }
+
+    return value;
+}
+
+static inline void unhold(Sfx* sfx)
+{
+    sfx->holdValue = -1;
+}
+
 static void drawCanvasLeds(Sfx* sfx, s32 x, s32 y, s32 canvasTab)
 {
     tic_mem* tic = sfx->tic;
 
-    enum 
+    enum
     {
-        Cols = SFX_TICKS, Rows = 16, 
+        Cols = SFX_TICKS, Rows = 16,
         Gap = 1, LedWidth = 3 + Gap, LedHeight = 1 + Gap,
-        Width = LedWidth * Cols + Gap, 
+        Width = LedWidth * Cols + Gap,
         Height = LedHeight * Rows + Gap
     };
 
@@ -74,7 +98,7 @@ static void drawCanvasLeds(Sfx* sfx, s32 x, s32 y, s32 canvasTab)
         tic_api_rect(tic, x + i, y, Gap, Height, tic_color_black);
 
     {
-        const tic_sfx_pos* pos = &tic->ram.sfxpos[DEFAULT_CHANNEL];
+        const tic_sfx_pos* pos = &tic->ram->sfxpos[DEFAULT_CHANNEL];
         s32 tickIndex = *(pos->data + canvasTab);
 
         if(tickIndex >= 0)
@@ -86,9 +110,9 @@ static void drawCanvasLeds(Sfx* sfx, s32 x, s32 y, s32 canvasTab)
     tic_sample* effect = getEffect(sfx);
     tic_rect border = {-1};
 
-    if(checkMousePos(&rect))
+    if(checkMousePos(sfx->studio, &rect))
     {
-        setCursor(tic_cursor_hand);
+        setCursor(sfx->studio, tic_cursor_hand);
 
         s32 mx = tic_api_mouse(tic).x - x;
         s32 my = tic_api_mouse(tic).y - y;
@@ -105,10 +129,12 @@ static void drawCanvasLeds(Sfx* sfx, s32 x, s32 y, s32 canvasTab)
         default: break;
         }
 
-        SHOW_TOOLTIP("[x=%02i y=%02i]", mx, vy);
+        SHOW_TOOLTIP(sfx->studio, "[x=%02i y=%02i]", mx, vy);
 
-        if(checkMouseDown(&rect, tic_mouse_left))
+        if(checkMouseDown(sfx->studio, &rect, tic_mouse_left))
         {
+            my = hold(sfx, my);
+
             switch(canvasTab)
             {
             case SFX_WAVE_PANEL:   effect->data[mx].wave = my; break;
@@ -120,6 +146,7 @@ static void drawCanvasLeds(Sfx* sfx, s32 x, s32 y, s32 canvasTab)
 
             history_add(sfx->history);
         }
+        else unhold(sfx);
     }
 
     for(s32 i = 0; i < Cols; i++)
@@ -155,7 +182,7 @@ static void drawCanvasLeds(Sfx* sfx, s32 x, s32 y, s32 canvasTab)
             for(s32 r = 0; r < Rows; r++)
             {
                 tic_api_rect(tic, x + loop->start * LedWidth + 2, y + Gap + r * LedHeight, 1, 1, tic_color_white);
-                tic_api_rect(tic, x + (loop->start + loop->size-1) * LedWidth + 2, y + Gap + r * LedHeight, 1, 1, tic_color_white);    
+                tic_api_rect(tic, x + (loop->start + loop->size-1) * LedWidth + 2, y + Gap + r * LedHeight, 1, 1, tic_color_white);
             }
     }
 
@@ -175,14 +202,14 @@ static void drawVolumeStereo(Sfx* sfx, s32 x, s32 y)
         tic_rect rect = {x, y, Width, Height};
 
         bool hover = false;
-        if(checkMousePos(&rect))
+        if(checkMousePos(sfx->studio, &rect))
         {
-            setCursor(tic_cursor_hand);
+            setCursor(sfx->studio, tic_cursor_hand);
             hover = true;
 
-            showTooltip("left stereo");
+            showTooltip(sfx->studio, "left stereo");
 
-            if(checkMouseClick(&rect, tic_mouse_left))
+            if(checkMouseClick(sfx->studio, &rect, tic_mouse_left))
                 effect->stereo_left = ~effect->stereo_left;
         }
 
@@ -193,14 +220,14 @@ static void drawVolumeStereo(Sfx* sfx, s32 x, s32 y)
         tic_rect rect = {x + 4, y, Width, Height};
 
         bool hover = false;
-        if(checkMousePos(&rect))
+        if(checkMousePos(sfx->studio, &rect))
         {
-            setCursor(tic_cursor_hand);
+            setCursor(sfx->studio, tic_cursor_hand);
             hover = true;
 
-            showTooltip("right stereo");
+            showTooltip(sfx->studio, "right stereo");
 
-            if(checkMouseClick(&rect, tic_mouse_left))
+            if(checkMouseClick(sfx->studio, &rect, tic_mouse_left))
                 effect->stereo_right = ~effect->stereo_right;
         }
 
@@ -222,14 +249,14 @@ static void drawArppeggioSwitch(Sfx* sfx, s32 x, s32 y)
         tic_rect rect = {x, y, Width, Height};
 
         bool hover = false;
-        if(checkMousePos(&rect))
+        if(checkMousePos(sfx->studio, &rect))
         {
-            setCursor(tic_cursor_hand);
+            setCursor(sfx->studio, tic_cursor_hand);
             hover = true;
 
-            showTooltip("up/down arpeggio");
+            showTooltip(sfx->studio, "up/down arpeggio");
 
-            if(checkMouseClick(&rect, tic_mouse_left))
+            if(checkMouseClick(sfx->studio, &rect, tic_mouse_left))
                 effect->reverse = ~effect->reverse;
         }
 
@@ -251,14 +278,14 @@ static void drawPitchSwitch(Sfx* sfx, s32 x, s32 y)
         tic_rect rect = {x, y, Width, Height};
 
         bool hover = false;
-        if(checkMousePos(&rect))
+        if(checkMousePos(sfx->studio, &rect))
         {
-            setCursor(tic_cursor_hand);
+            setCursor(sfx->studio, tic_cursor_hand);
             hover = true;
 
-            showTooltip("x16 pitch");
+            showTooltip(sfx->studio, "x16 pitch");
 
-            if(checkMouseClick(&rect, tic_mouse_left))
+            if(checkMouseClick(sfx->studio, &rect, tic_mouse_left))
                 effect->pitch16x = ~effect->pitch16x;
         }
 
@@ -271,7 +298,7 @@ static void drawVolWaveSelector(Sfx* sfx, s32 x, s32 y)
     tic_mem* tic = sfx->tic;
 
     typedef struct {const char* label; s32 panel; tic_rect rect; const char* tip;} Item;
-    static const Item Items[] = 
+    static const Item Items[] =
     {
         {"WAV", SFX_WAVE_PANEL, {TIC_ALTFONT_WIDTH * 3, 0, TIC_ALTFONT_WIDTH * 3, TIC_FONT_HEIGHT}, "wave data"},
         {"VOL", SFX_VOLUME_PANEL, {0, 0, TIC_ALTFONT_WIDTH * 3, TIC_FONT_HEIGHT}, "volume data"},
@@ -285,15 +312,15 @@ static void drawVolWaveSelector(Sfx* sfx, s32 x, s32 y)
 
         bool hover = false;
 
-        if(checkMousePos(&rect))
+        if(checkMousePos(sfx->studio, &rect))
         {
-            showTooltip(item->tip);
+            showTooltip(sfx->studio, item->tip);
 
-            setCursor(tic_cursor_hand);
+            setCursor(sfx->studio, tic_cursor_hand);
 
             hover = true;
 
-            if(checkMouseClick(&rect, tic_mouse_left))
+            if(checkMouseClick(sfx->studio, &rect, tic_mouse_left))
                 sfx->volwave = item->panel;
         }
 
@@ -305,7 +332,7 @@ static void drawCanvas(Sfx* sfx, s32 x, s32 y, s32 canvasTab)
 {
     tic_mem* tic = sfx->tic;
 
-    enum 
+    enum
     {
         Width = 147, Height = 33
     };
@@ -349,42 +376,42 @@ static void drawCanvas(Sfx* sfx, s32 x, s32 y, s32 canvasTab)
         tic_rect rect = {x + 2, y + 27, ArrowWidth, ArrowHeight};
         bool hover = false;
 
-        if(checkMousePos(&rect))
+        if(checkMousePos(sfx->studio, &rect))
         {
-            setCursor(tic_cursor_hand);
+            setCursor(sfx->studio, tic_cursor_hand);
             hover = true;
 
-            showTooltip(SetLoopPosLabel);
+            showTooltip(sfx->studio, SetLoopPosLabel);
 
-            if(checkMouseClick(&rect, tic_mouse_left))
+            if(checkMouseClick(sfx->studio, &rect, tic_mouse_left))
             {
                 effect->loops[canvasTab].start--;
                 history_add(sfx->history);
             }
         }
 
-        drawBitIcon(tic_icon_left, rect.x - 2, rect.y - 1, hover ? tic_color_grey : tic_color_dark_grey);
+        drawBitIcon(sfx->studio, tic_icon_left, rect.x - 2, rect.y - 1, hover ? tic_color_grey : tic_color_dark_grey);
     }
 
     {
         tic_rect rect = {x + 10, y + 27, ArrowWidth, ArrowHeight};
         bool hover = false;
 
-        if(checkMousePos(&rect))
+        if(checkMousePos(sfx->studio, &rect))
         {
-            setCursor(tic_cursor_hand);
+            setCursor(sfx->studio, tic_cursor_hand);
             hover = true;
 
-            showTooltip(SetLoopPosLabel);
+            showTooltip(sfx->studio, SetLoopPosLabel);
 
-            if(checkMouseClick(&rect, tic_mouse_left))
+            if(checkMouseClick(sfx->studio, &rect, tic_mouse_left))
             {
                 effect->loops[canvasTab].start++;
                 history_add(sfx->history);
             }
         }
 
-        drawBitIcon(tic_icon_right, rect.x - 2, rect.y - 1, hover ? tic_color_grey : tic_color_dark_grey);
+        drawBitIcon(sfx->studio, tic_icon_right, rect.x - 2, rect.y - 1, hover ? tic_color_grey : tic_color_dark_grey);
     }
 
     {
@@ -397,40 +424,40 @@ static void drawCanvas(Sfx* sfx, s32 x, s32 y, s32 canvasTab)
         tic_rect rect = {x + 14, y + 27, ArrowWidth, ArrowHeight};
         bool hover = false;
 
-        if(checkMousePos(&rect))
+        if(checkMousePos(sfx->studio, &rect))
         {
-            setCursor(tic_cursor_hand);
+            setCursor(sfx->studio, tic_cursor_hand);
             hover = true;
-            showTooltip(SetLoopSizeLabel);
+            showTooltip(sfx->studio, SetLoopSizeLabel);
 
-            if(checkMouseClick(&rect, tic_mouse_left))
+            if(checkMouseClick(sfx->studio, &rect, tic_mouse_left))
             {
                 effect->loops[canvasTab].size--;
                 history_add(sfx->history);
             }
         }
 
-        drawBitIcon(tic_icon_left, rect.x - 2, rect.y - 1, hover ? tic_color_grey : tic_color_dark_grey);
+        drawBitIcon(sfx->studio, tic_icon_left, rect.x - 2, rect.y - 1, hover ? tic_color_grey : tic_color_dark_grey);
     }
 
     {
         tic_rect rect = {x + 22, y + 27, ArrowWidth, ArrowHeight};
         bool hover = false;
 
-        if(checkMousePos(&rect))
+        if(checkMousePos(sfx->studio, &rect))
         {
-            setCursor(tic_cursor_hand);
+            setCursor(sfx->studio, tic_cursor_hand);
             hover = true;
-            showTooltip(SetLoopSizeLabel);
+            showTooltip(sfx->studio, SetLoopSizeLabel);
 
-            if(checkMouseClick(&rect, tic_mouse_left))
+            if(checkMouseClick(sfx->studio, &rect, tic_mouse_left))
             {
                 effect->loops[canvasTab].size++;
                 history_add(sfx->history);
             }
         }
 
-        drawBitIcon(tic_icon_right, rect.x - 2, rect.y - 1, hover ? tic_color_grey : tic_color_dark_grey);
+        drawBitIcon(sfx->studio, tic_icon_right, rect.x - 2, rect.y - 1, hover ? tic_color_grey : tic_color_dark_grey);
     }
 
     {
@@ -448,12 +475,12 @@ static void playSound(Sfx* sfx)
     {
         tic_sample* effect = getEffect(sfx);
 
-        if(sfx->play.note != effect->note)
+        if(sfx->play.note != effect->note || sfx->play.tick == 0)
         {
             sfx->play.note = effect->note;
 
             sfx_stop(sfx->tic, DEFAULT_CHANNEL);
-            tic_api_sfx(sfx->tic, sfx->index, effect->note, effect->octave, -1, DEFAULT_CHANNEL, MAX_VOLUME, MAX_VOLUME, SFX_DEF_SPEED);
+            tic_api_sfx(sfx->tic, sfx->index, effect->note, effect->octave + effect->temp, -1, DEFAULT_CHANNEL, MAX_VOLUME, MAX_VOLUME, SFX_DEF_SPEED);
         }
     }
     else
@@ -497,21 +524,27 @@ static void copyFromClipboard(Sfx* sfx)
 {
     tic_sample* effect = getEffect(sfx);
 
-    if(fromClipboard(effect, sizeof(tic_sample), true, false))
+    if(fromClipboard(effect, sizeof(tic_sample), true, false, true))
         history_add(sfx->history);
+}
+
+static inline bool keyWasPressedOnce(tic_mem* tic, s32 key)
+{
+    return tic_api_keyp(tic, key, -1, -1);
 }
 
 static void processKeyboard(Sfx* sfx)
 {
     tic_mem* tic = sfx->tic;
 
-    if(tic->ram.input.keyboard.data == 0) return;
+    if(tic->ram->input.keyboard.data == 0) return;
 
     bool ctrl = tic_api_key(tic, tic_key_ctrl);
+    bool shift = tic_api_key(tic, tic_key_shift);
 
     s32 keyboardButton = -1;
 
-    static const s32 Keycodes[] = 
+    static const s32 Keycodes[] =
     {
         tic_key_z,
         tic_key_s,
@@ -525,29 +558,78 @@ static void processKeyboard(Sfx* sfx)
         tic_key_n,
         tic_key_j,
         tic_key_m,
+        tic_key_comma,
+        tic_key_l,
+        tic_key_period,
+        tic_key_semicolon,
+        tic_key_slash,
+
+        // octave +1
+        tic_key_q,
+        tic_key_2,
+        tic_key_w,
+        tic_key_3,
+        tic_key_e,
+        tic_key_r,
+        tic_key_5,
+        tic_key_t,
+        tic_key_6,
+        tic_key_y,
+        tic_key_7,
+        tic_key_u,
+
+        // extra keys
+        tic_key_i,
+        tic_key_9,
+        tic_key_o,
+        tic_key_0,
+        tic_key_p,
     };
 
     if(tic_api_key(tic, tic_key_alt))
         return;
 
-    if(ctrl) {}
+    tic_sample* effect = getEffect(sfx);
+
+    if(ctrl || shift) { }
     else
     {
-        for(int i = 0; i < COUNT_OF(Keycodes); i++)
-            if(tic_api_key(tic, Keycodes[i]))
-                keyboardButton = i;        
-    }
+        u8 octaveShift = 0;
+        for(int i = 0; i < COUNT_OF(Keycodes); i++) {
+            if(tic_api_key(tic, Keycodes[i])) {
+                if (sfx->play.tick == 0 && !keyWasPressedOnce(tic, Keycodes[i]))
+                    continue;
 
-    tic_sample* effect = getEffect(sfx);
+                keyboardButton = (i > SECOND_OCTAVE_KEYBOARD_INDEX
+                    ? i - SECOND_OCTAVE_KEYBOARD_SHIFT
+                    : i) % NOTES;
+
+                octaveShift = (i - keyboardButton) / NOTES;
+            }
+        }
+
+        if (effect->temp != octaveShift)
+            sfx->play.tick = 0;
+
+        effect->temp = octaveShift;
+    }
 
     if(keyboardButton >= 0)
     {
+        if (keyboardButton != sfx->play.note)
+            sfx->play.tick = 0;
+
         effect->note = keyboardButton;
         sfx->play.active = true;
     }
 
     if(tic_api_key(tic, tic_key_space))
         sfx->play.active = true;
+
+    if(keyWasPressedOnce(tic, tic_key_z) && shift)
+        effect->octave--;
+    else if(keyWasPressedOnce(tic, tic_key_x) && shift)
+        effect->octave++;
 }
 
 static void processEnvelopesKeyboard(Sfx* sfx)
@@ -555,7 +637,7 @@ static void processEnvelopesKeyboard(Sfx* sfx)
     tic_mem* tic = sfx->tic;
     bool ctrl = tic_api_key(tic, tic_key_ctrl);
 
-    switch(getClipboardEvent())
+    switch(getClipboardEvent(sfx->studio))
     {
     case TIC_CLIPBOARD_CUT: cutToClipboard(sfx); break;
     case TIC_CLIPBOARD_COPY: copyToClipboard(sfx); break;
@@ -565,13 +647,13 @@ static void processEnvelopesKeyboard(Sfx* sfx)
 
     if(ctrl)
     {
-        if(keyWasPressed(tic_key_z))        undo(sfx);
-        else if(keyWasPressed(tic_key_y))   redo(sfx);
+        if(keyWasPressed(sfx->studio, tic_key_z))        undo(sfx);
+        else if(keyWasPressed(sfx->studio, tic_key_y))   redo(sfx);
     }
 
-    else if(keyWasPressed(tic_key_left))    sfx->index--;
-    else if(keyWasPressed(tic_key_right))   sfx->index++;
-    else if(keyWasPressed(tic_key_delete))  resetSfx(sfx);
+    else if(keyWasPressed(sfx->studio, tic_key_left))    sfx->index--;
+    else if(keyWasPressed(sfx->studio, tic_key_right))   sfx->index++;
+    else if(keyWasPressed(sfx->studio, tic_key_delete))  resetSfx(sfx);
 }
 
 static tic_waveform* getWave(Sfx* sfx)
@@ -595,7 +677,7 @@ static void cutWave(Sfx* sfx)
 
 static void pasteWave(Sfx* sfx)
 {
-    if(fromClipboard(getWave(sfx), sizeof(tic_waveform), true, false))
+    if(fromClipboard(getWave(sfx), sizeof(tic_waveform), true, false, true))
         history_add(sfx->waveHistory);
 }
 
@@ -611,12 +693,12 @@ static void redoWave(Sfx* sfx)
 
 static void drawWavesBar(Sfx* sfx, s32 x, s32 y)
 {
-    static struct Button 
+    static struct Button
     {
         u8 icon;
         const char* tip;
         void(*handler)(Sfx*);
-    } Buttons[] = 
+    } Buttons[] =
     {
         {
             tic_icon_cut,
@@ -653,24 +735,24 @@ static void drawWavesBar(Sfx* sfx, s32 x, s32 y)
 
         bool over = false;
         s32 push = 0;
-        if(checkMousePos(&rect))
+        if(checkMousePos(sfx->studio, &rect))
         {
             over = true;
-            setCursor(tic_cursor_hand);
+            setCursor(sfx->studio, tic_cursor_hand);
 
-            showTooltip(it->tip);
+            showTooltip(sfx->studio, it->tip);
 
-            if(checkMouseDown(&rect, tic_mouse_left))
+            if(checkMouseDown(sfx->studio, &rect, tic_mouse_left))
                 push = 1;
 
-            if(checkMouseClick(&rect, tic_mouse_left))
+            if(checkMouseClick(sfx->studio, &rect, tic_mouse_left))
                 it->handler(sfx);
         }
 
         if(over)
-            drawBitIcon(it->icon, rect.x, rect.y + 1, tic_color_black);
+            drawBitIcon(sfx->studio, it->icon, rect.x, rect.y + 1, tic_color_black);
 
-        drawBitIcon(it->icon, rect.x, rect.y + push, 
+        drawBitIcon(sfx->studio, it->icon, rect.x, rect.y + push,
             over ? tic_color_white : tic_color_dark_grey);
 
         y += Size;
@@ -692,15 +774,15 @@ static void drawWaves(Sfx* sfx, s32 x, s32 y)
         tic_sample* effect = getEffect(sfx);
         bool hover = false;
 
-        if(checkMousePos(&rect))
+        if(checkMousePos(sfx->studio, &rect))
         {
-            setCursor(tic_cursor_hand);
+            setCursor(sfx->studio, tic_cursor_hand);
 
             hover = true;
 
-            SHOW_TOOLTIP("select wave #%02i", i);
+            SHOW_TOOLTIP(sfx->studio, "select wave #%02i", i);
 
-            if(checkMouseClick(&rect, tic_mouse_left))
+            if(checkMouseClick(sfx->studio, &rect, tic_mouse_left))
             {
                 for(s32 c = 0; c < SFX_TICKS; c++)
                     effect->data[c].wave = i;
@@ -711,7 +793,7 @@ static void drawWaves(Sfx* sfx, s32 x, s32 y)
 
         bool sel = i == effect->data[0].wave;
 
-        const tic_sfx_pos* pos = &tic->ram.sfxpos[DEFAULT_CHANNEL];
+        const tic_sfx_pos* pos = &tic->ram->sfxpos[DEFAULT_CHANNEL];
         bool active = *pos->data < 0 ? sfx->hoverWave == i : i == effect->data[*pos->data].wave;
 
         drawPanelBorder(tic, rect.x, rect.y, rect.w, rect.h, active ? tic_color_orange : sel ? tic_color_light_green : tic_color_black);
@@ -723,7 +805,7 @@ static void drawWaves(Sfx* sfx, s32 x, s32 y)
             for(s32 i = 0; i < WAVE_VALUES/Scale; i++)
             {
                 s32 value = tic_tool_peek4(wave->data, i*Scale)/Scale;
-                tic_api_pix(tic, rect.x + i+1, rect.y + Height - value - 2, 
+                tic_api_pix(tic, rect.x + i+1, rect.y + Height - value - 2,
                     active ? tic_color_red : sel ? tic_color_dark_green : hover ? tic_color_light_grey : tic_color_white, false);
             }
 
@@ -743,8 +825,8 @@ static void drawWavePanel(Sfx* sfx, s32 x, s32 y)
 
     enum {Width = 73, Height = 83, Round = 2};
 
-    typedef struct {s32 x; s32 y; s32 x1; s32 y1; tic_color color;} Edge; 
-    static const Edge Edges[] = 
+    typedef struct {s32 x; s32 y; s32 x1; s32 y1; tic_color color;} Edge;
+    static const Edge Edges[] =
     {
         {Width, Round, Width, Height - Round, tic_color_dark_grey},
         {Round, Height, Width - Round, Height, tic_color_dark_grey},
@@ -779,28 +861,31 @@ static void drawWavePanel(Sfx* sfx, s32 x, s32 y)
         }
         else
         {
-            if(checkMousePos(&rect))
+            if(checkMousePos(sfx->studio, &rect))
             {
-                setCursor(tic_cursor_hand);
+                setCursor(sfx->studio, tic_cursor_hand);
 
                 s32 cx = (tic_api_mouse(tic).x - rect.x) / Scale;
                 s32 cy = MaxValue - (tic_api_mouse(tic).y - rect.y) / Scale;
 
-                SHOW_TOOLTIP("[x=%02i y=%02i]", cx, cy);
+                SHOW_TOOLTIP(sfx->studio, "[x=%02i y=%02i]", cx, cy);
 
                 enum {Border = 1};
-                tic_api_rectb(tic, rect.x + cx*Scale - Border, 
+                tic_api_rectb(tic, rect.x + cx*Scale - Border,
                     rect.y + (MaxValue - cy) * Scale - Border, Scale + Border*2, Scale + Border*2, tic_color_dark_green);
 
-                if(checkMouseDown(&rect, tic_mouse_left))
+                if(checkMouseDown(sfx->studio, &rect, tic_mouse_left))
                 {
+                    cy = hold(sfx, cy);
+
                     if(tic_tool_peek4(wave->data, cx) != cy)
                     {
                         tic_tool_poke4(wave->data, cx, cy);
                         history_add(sfx->waveHistory);
                     }
                 }
-            }       
+                else unhold(sfx);
+            }
 
             for(s32 i = 0; i < WAVE_VALUES; i++)
             {
@@ -824,11 +909,11 @@ static void drawPianoOctave(Sfx* sfx, s32 x, s32 y, s32 octave)
 {
     tic_mem* tic = sfx->tic;
 
-    enum 
+    enum
     {
         Gap = 1, WhiteShadow = 1,
         WhiteWidth = 3, WhiteHeight = 8, WhiteCount = 7, WhiteWidthGap = WhiteWidth + Gap,
-        BlackWidth = 3, BlackHeight = 4, BlackCount = 6, 
+        BlackWidth = 3, BlackHeight = 4, BlackCount = 6,
         BlackOffset = WhiteWidth - (BlackWidth - Gap) / 2,
         Width = WhiteCount * WhiteWidthGap - Gap,
         Height = WhiteHeight
@@ -837,7 +922,7 @@ static void drawPianoOctave(Sfx* sfx, s32 x, s32 y, s32 octave)
     tic_rect rect = {x, y, Width, Height};
 
     typedef struct{s32 note; tic_rect rect; bool white;} PianoBtn;
-    static const PianoBtn Buttons[] = 
+    static const PianoBtn Buttons[] =
     {
         {0, WhiteWidthGap * 0, 0, WhiteWidth, WhiteHeight, true},
         {2, WhiteWidthGap * 1, 0, WhiteWidth, WhiteHeight, true},
@@ -858,7 +943,7 @@ static void drawPianoOctave(Sfx* sfx, s32 x, s32 y, s32 octave)
 
     s32 hover = -1;
 
-    if(checkMousePos(&rect))
+    if(checkMousePos(sfx->studio, &rect))
     {
         for(s32 i = COUNT_OF(Buttons)-1; i >= 0; i--)
         {
@@ -867,18 +952,18 @@ static void drawPianoOctave(Sfx* sfx, s32 x, s32 y, s32 octave)
             btnRect.x += x;
             btnRect.y += y;
 
-            if(checkMousePos(&btnRect))
+            if(checkMousePos(sfx->studio, &btnRect))
             {
-                setCursor(tic_cursor_hand);
+                setCursor(sfx->studio, tic_cursor_hand);
 
                 hover = btn->note;
 
                 {
                     static const char* Notes[] = SFX_NOTES;
-                    SHOW_TOOLTIP("play %s%i note", Notes[btn->note], octave + 1);
+                    SHOW_TOOLTIP(sfx->studio, "play %s%i note", Notes[btn->note], octave + 1);
                 }
 
-                if(checkMouseDown(&rect, tic_mouse_left))
+                if(checkMouseDown(sfx->studio, &rect, tic_mouse_left))
                 {
                     effect->note = btn->note;
                     effect->octave = octave;
@@ -892,7 +977,9 @@ static void drawPianoOctave(Sfx* sfx, s32 x, s32 y, s32 octave)
         }
     }
 
-    bool active = sfx->play.active && effect->octave == octave;
+    s32 currentOctave = effect->octave + effect->temp;
+
+    bool active = sfx->play.active && currentOctave == octave;
 
     tic_api_rect(tic, rect.x, rect.y, rect.w, rect.h, tic_color_dark_grey);
 
@@ -900,18 +987,19 @@ static void drawPianoOctave(Sfx* sfx, s32 x, s32 y, s32 octave)
     {
         const PianoBtn* btn = Buttons + i;
         const tic_rect* rect = &btn->rect;
-        tic_api_rect(tic, x + rect->x, y + rect->y, rect->w, rect->h, 
-            active && effect->note == btn->note ? tic_color_red : 
-                btn->white 
-                    ? hover == btn->note ? tic_color_light_grey : tic_color_white 
+        tic_api_rect(tic, x + rect->x, y + rect->y, rect->w, rect->h,
+            active && effect->note == btn->note ? tic_color_red :
+                btn->white
+                    ? hover == btn->note ? tic_color_light_grey : tic_color_white
                     : hover == btn->note ? tic_color_dark_grey : tic_color_black);
 
         if(btn->white)
             tic_api_rect(tic, x + rect->x, y + (WhiteHeight - WhiteShadow), WhiteWidth, WhiteShadow, tic_color_black);
 
         // draw current note marker
-        if(effect->octave == octave && effect->note == btn->note)
+        if(currentOctave == octave && effect->note == btn->note) {
             tic_api_rect(tic, x + rect->x + 1, y + rect->y + rect->h - 3, 1, 1, tic_color_red);
+        }
     }
 }
 
@@ -931,9 +1019,9 @@ static void drawSpeedPanel(Sfx* sfx, s32 x, s32 y)
 {
     tic_mem* tic = sfx->tic;
 
-    enum 
+    enum
     {
-        Count = 8, Gap = 1, ColWidth = 1, ColWidthGap = ColWidth + Gap, 
+        Count = 8, Gap = 1, ColWidth = 1, ColWidthGap = ColWidth + Gap,
         Width = Count * ColWidthGap - Gap, Height = 5,
         MaxSpeed = (1 << SFX_SPEED_BITS) / 2
     };
@@ -942,16 +1030,16 @@ static void drawSpeedPanel(Sfx* sfx, s32 x, s32 y)
     tic_sample* effect = getEffect(sfx);
     s32 hover = -1;
 
-    if(checkMousePos(&rect))
+    if(checkMousePos(sfx->studio, &rect))
     {
-        setCursor(tic_cursor_hand);
+        setCursor(sfx->studio, tic_cursor_hand);
 
         s32 spd = (tic_api_mouse(tic).x - rect.x) / ColWidthGap;
         hover = spd;
 
-        SHOW_TOOLTIP("set speed to %i", spd);
+        SHOW_TOOLTIP(sfx->studio, "set speed to %i", spd);
 
-        if(checkMouseDown(&rect, tic_mouse_left))
+        if(checkMouseDown(sfx->studio, &rect, tic_mouse_left))
         {
             effect->speed = spd - MaxSpeed;
             history_add(sfx->history);
@@ -970,7 +1058,7 @@ static void drawSelectorPanel(Sfx* sfx, s32 x, s32 y)
 
     enum
     {
-        Size = 3, Gap = 1, SizeGap = Size + Gap, 
+        Size = 3, Gap = 1, SizeGap = Size + Gap,
         GroupGap = 2, Groups = 4, Cols = 4, Rows = SFX_COUNT / (Cols * Groups),
         GroupWidth = Cols * SizeGap - Gap,
         Width = (GroupWidth + GroupGap) * Groups - GroupGap, Height = Rows * SizeGap - Gap
@@ -979,21 +1067,21 @@ static void drawSelectorPanel(Sfx* sfx, s32 x, s32 y)
     tic_rect rect = {x, y, Width, Height};
     s32 hover = -1;
 
-    if(checkMousePos(&rect))
+    if(checkMousePos(sfx->studio, &rect))
         for(s32 g = 0, i = 0; g < Groups; g++)
             for(s32 r = 0; r < Rows; r++)
                 for(s32 c = 0; c < Cols; c++, i++)
                 {
                     tic_rect rect = {x + c * SizeGap + g * (GroupWidth + GroupGap), y + r * SizeGap, SizeGap, SizeGap};
 
-                    if(checkMousePos(&rect))
+                    if(checkMousePos(sfx->studio, &rect))
                     {
-                        setCursor(tic_cursor_hand);
+                        setCursor(sfx->studio, tic_cursor_hand);
                         hover = i;
 
-                        SHOW_TOOLTIP("edit sfx #%02i", hover);
+                        SHOW_TOOLTIP(sfx->studio, "edit sfx #%02i", hover);
 
-                        if(checkMouseClick(&rect, tic_mouse_left))
+                        if(checkMouseClick(sfx->studio, &rect, tic_mouse_left))
                             sfx->index = i;
 
                         goto draw;
@@ -1008,7 +1096,7 @@ draw:
                 static const u8 EmptyEffect[sizeof(tic_sample)] = {0};
                 bool empty = memcmp(sfx->src->samples.data + i, EmptyEffect, sizeof EmptyEffect) == 0;
 
-                tic_api_rect(tic, x + c * SizeGap + g * (GroupWidth + GroupGap), y + r * SizeGap, Size, Size, 
+                tic_api_rect(tic, x + c * SizeGap + g * (GroupWidth + GroupGap), y + r * SizeGap, Size, Size,
                     sfx->index == i ? tic_color_light_green : hover == i ? tic_color_grey : empty ? tic_color_dark_grey : tic_color_light_grey);
             }
 }
@@ -1051,13 +1139,13 @@ static void tick(Sfx* sfx)
     drawSelector(sfx, 9, 12);
     drawPiano(sfx, 5, 127);
     drawWavePanel(sfx, 7, 41);
-    drawToolbar(tic, true);
+    drawToolbar(sfx->studio, tic, true);
 
     playSound(sfx);
 
     if(sfx->play.active)
         sfx->play.tick++;
-    else 
+    else
         sfx->play.tick = 0;
 }
 
@@ -1074,20 +1162,22 @@ static void onStudioEvent(Sfx* sfx, StudioEvent event)
     }
 }
 
-void initSfx(Sfx* sfx, tic_mem* tic, tic_sfx* src)
+void initSfx(Sfx* sfx, Studio* studio, tic_sfx* src)
 {
     if(sfx->history) history_delete(sfx->history);
     if(sfx->waveHistory) history_delete(sfx->waveHistory);
-    
+
     *sfx = (Sfx)
     {
-        .tic = tic,
+        .studio = studio,
+        .tic = getMemory(studio),
         .tick = tick,
         .src = src,
         .index = 0,
         .volwave = SFX_VOLUME_PANEL,
         .hoverWave = -1,
-        .play = 
+        .holdValue = -1,
+        .play =
         {
             .note = -1,
             .active = false,

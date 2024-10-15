@@ -2,7 +2,7 @@
 
 // derived from keymap_it
 
-static const tic_keycode TicKeyboardCodes[256] = 
+static const tic_keycode TicKeyboardCodes[256] =
 	{
 tic_key_unknown,	 // KeyNone, 0x00
 tic_key_unknown,	 // KeyNone, 0x01
@@ -53,8 +53,8 @@ tic_key_apostrophe,	 // '\'', 0x2D
 tic_key_unknown,	 // C('?'), 0x2E -- ^
 tic_key_leftbracket,	 // C('?'), 0x2F --  [
 tic_key_rightbracket,	 // '+', 0x30 --  ]
-tic_key_unknown,	 // C('?'), 0x31 
-tic_key_unknown,	 // C('?'), 0x32  
+tic_key_unknown,	 // C('?'), 0x31
+tic_key_unknown,	 // C('?'), 0x32
 tic_key_unknown,	 // C('?'), 0x33 -- @
 tic_key_unknown,	 // C('?'), 0x34 -- #
 tic_key_backslash,	 // '\\', 0x35
@@ -88,22 +88,22 @@ tic_key_left,		 // KeyLeft, 0x50
 tic_key_down,		 // KeyDown, 0x51
 tic_key_up,		 // KeyUp, 0x52
 tic_key_unknown,	 // KeyNumLock, 0x53
-tic_key_unknown,	 // KeyKP_Divide, 0x54
-tic_key_unknown,	 // KeyKP_Multiply, 0x55
-tic_key_unknown,	 // KeyKP_Subtract, 0x56
-tic_key_unknown,	 // KeyKP_Add, 0x57
-tic_key_unknown,	 // KeyKP_Enter, 0x58
-tic_key_unknown,	 // KeyEnd, 0x59
-tic_key_unknown,	 // KeyDown, 0x5A
-tic_key_unknown,	 // KeyPageDown, 0x5B
-tic_key_unknown,	 // KeyLeft, 0x5C
-tic_key_unknown,	 // KeyKP_Center, 0x5D
-tic_key_unknown,	 // KeyRight, 0x5E
-tic_key_unknown,	 // KeyHome, 0x5F
-tic_key_unknown,	 // KeyUp, 0x60
-tic_key_unknown,	 // KeyPageUp, 0x61
-tic_key_unknown,	 // KeyInsert, 0x62
-tic_key_unknown,	 // KeyDelete, 0x63
+tic_key_numpaddivide,	 // KeyKP_Divide, 0x54
+tic_key_numpadmultiply,	 // KeyKP_Multiply, 0x55
+tic_key_numpadminus,	 // KeyKP_Subtract, 0x56
+tic_key_numpadplus,	 // KeyKP_Add, 0x57
+tic_key_numpadenter,	 // KeyKP_Enter, 0x58
+tic_key_numpad1,	 // KeyEnd, 0x59
+tic_key_numpad2,	 // KeyDown, 0x5A
+tic_key_numpad3,	 // KeyPageDown, 0x5B
+tic_key_numpad4,	 // KeyLeft, 0x5C
+tic_key_numpad5,	 // KeyKP_Center, 0x5D
+tic_key_numpad6,	 // KeyRight, 0x5E
+tic_key_numpad7,	 // KeyHome, 0x5F
+tic_key_numpad8,	 // KeyUp, 0x60
+tic_key_numpad9,	 // KeyPageUp, 0x61
+tic_key_numpad0,	 // KeyInsert, 0x62
+tic_key_numpadperiod,	 // KeyDelete, 0x63
 tic_key_unknown,	 // '<', 0x64
 tic_key_unknown,	 // KeyApplication, 0x65
 tic_key_unknown,	 // KeyNone, 0x66

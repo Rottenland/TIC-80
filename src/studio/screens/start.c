@@ -32,7 +32,7 @@
 
 static void reset(Start* start)
 {
-    u8* tile = (u8*)start->tic->ram.tiles.data;
+    u8* tile = (u8*)start->tic->ram->tiles.data;
 
     tic_api_cls(start->tic, tic_color_black);
 
@@ -47,53 +47,48 @@ static void reset(Start* start)
 static void drawHeader(Start* start)
 {
     for(s32 i = 0; i < STUDIO_TEXT_BUFFER_SIZE; i++)
-        tic_api_print(start->tic, (char[]){start->text[i], '\0'}, 
-            (i % STUDIO_TEXT_BUFFER_WIDTH) * STUDIO_TEXT_WIDTH, 
-            (i / STUDIO_TEXT_BUFFER_WIDTH) * STUDIO_TEXT_HEIGHT, 
+        tic_api_print(start->tic, (char[]){start->text[i], '\0'},
+            (i % STUDIO_TEXT_BUFFER_WIDTH) * STUDIO_TEXT_WIDTH,
+            (i / STUDIO_TEXT_BUFFER_WIDTH) * STUDIO_TEXT_HEIGHT,
             start->color[i], true, 1, false);
+}
+
+static void chime(Start* start)
+{
+    playSystemSfx(start->studio, 1);
+}
+
+static void stop_chime(Start* start)
+{
+    sfx_stop(start->tic, 0);
 }
 
 static void header(Start* start)
 {
-    if(!start->play)
-    {
-        playSystemSfx(1);
-
-        start->play = true;
-    }
-
     drawHeader(start);
 }
 
-static void end(Start* start)
+static void start_console(Start* start)
 {
-    if(start->play)
-    {   
-        sfx_stop(start->tic, 0);
-
-        start->play = false;
-    }
-
     drawHeader(start);
-
-    setStudioMode(TIC_CONSOLE_MODE);
+    setStudioMode(start->studio, TIC_CONSOLE_MODE);
 }
 
 static void tick(Start* start)
 {
-    if(!start->initialized)
-    {
-        start->phase = 1;
-        start->ticks = 0;
-
-        start->initialized = true;
+    // stages that have a tick count of 0 run in zero time
+    // (typically this is only used to start/stop audio)
+    while (start->stages[start->stage].ticks == 0) {
+        start->stages[start->stage].fn(start);
+        start->stage++;
     }
 
     tic_api_cls(start->tic, TIC_COLOR_BG);
 
-    static void(*const steps[])(Start*) = {reset, header, end};
-
-    steps[CLAMP(start->ticks / TIC80_FRAMERATE, 0, COUNT_OF(steps) - 1)](start);
+    Stage *stage = &start->stages[start->stage];
+    stage->fn(start);
+    if (stage->ticks > 0) stage->ticks--;
+    if (stage->ticks == 0) start->stage++;
 
     start->ticks++;
 }
@@ -119,23 +114,34 @@ static void* _memmem(const void* haystack, size_t hlen, const void* needle, size
     return NULL;
 }
 
-void initStart(Start* start, tic_mem* tic, const char* cart)
+void initStart(Start* start, Studio* studio, const char* cart)
 {
-    *start = (Start)
-    {
-        .tic = tic,
-        .initialized = false,
-        .phase = 1,
-        .ticks = 0,
-        .tick = tick,
-        .play = false,
-        .embed = false,
+    enum duration {
+        immediate = 0,
+        one_second = TIC80_FRAMERATE,
+        forever = -1
     };
 
-    start->text = calloc(1, STUDIO_TEXT_BUFFER_SIZE);
-    start->color = calloc(1, STUDIO_TEXT_BUFFER_SIZE);
+    *start = (Start)
+    {
+        .studio = studio,
+        .tic = getMemory(studio),
+        .initialized = true,
+        .tick = tick,
+        .embed = false,
+        .ticks = 0,
+        .stage = 0,
+        .stages =
+        {
+            { reset, .ticks = one_second },
+            { chime, .ticks = immediate },
+            { header, .ticks = one_second },
+            { stop_chime, .ticks = immediate },
+            { start_console, .ticks = forever },
+        }
+    };
 
-    static const char* Header[] = 
+    static const char* Header[] =
     {
         "",
         " " TIC_NAME_FULL,
@@ -144,10 +150,10 @@ void initStart(Start* start, tic_mem* tic, const char* cart)
     };
 
     for(s32 i = 0; i < COUNT_OF(Header); i++)
-        strcpy(start->text + i * STUDIO_TEXT_BUFFER_WIDTH, Header[i]);
+        strcpy(&start->text[i * STUDIO_TEXT_BUFFER_WIDTH], Header[i]);
 
     for(s32 i = 0; i < STUDIO_TEXT_BUFFER_SIZE; i++)
-        start->color[i] = CLAMP(((i % STUDIO_TEXT_BUFFER_WIDTH) + (i / STUDIO_TEXT_BUFFER_WIDTH)) / 2, 
+        start->color[i] = CLAMP(((i % STUDIO_TEXT_BUFFER_WIDTH) + (i / STUDIO_TEXT_BUFFER_WIDTH)) / 2,
             tic_color_black, tic_color_dark_grey);
 
 #if defined(__EMSCRIPTEN__)
@@ -159,8 +165,8 @@ void initStart(Start* start, tic_mem* tic, const char* cart)
 
         if(data) SCOPE(free(data))
         {
-            tic_cart_load(&tic->cart, data, size);
-            tic_api_reset(tic);
+            tic_cart_load(&start->tic->cart, data, size);
+            tic_api_reset(start->tic);
             start->embed = true;
         }
     }
@@ -168,54 +174,40 @@ void initStart(Start* start, tic_mem* tic, const char* cart)
 #else
 
     {
-        char appPath[TICNAME_MAX];
-    
-#   if defined(__TIC_WINDOWS__)
-        {
-            wchar_t wideAppPath[TICNAME_MAX];
-            GetModuleFileNameW(NULL, wideAppPath, sizeof wideAppPath);
-            WideCharToMultiByte(CP_UTF8, 0, wideAppPath, COUNT_OF(wideAppPath), appPath, COUNT_OF(appPath), 0, 0);
-        }
-#   elif defined(__TIC_LINUX__)
-        s32 size = readlink("/proc/self/exe", appPath, sizeof appPath);
-        appPath[size] = '\0';
-#   elif defined(__TIC_MACOSX__)
-        s32 size = sizeof appPath;
-        _NSGetExecutablePath(appPath, &size);
-#   endif
-    
+        const char* appPath = fs_apppath();
+
         s32 appSize = 0;
         u8* app = fs_read(appPath, &appSize);
-    
+
         if(app) SCOPE(free(app))
         {
             s32 size = appSize;
             const u8* ptr = app;
-    
+
             while(true)
             {
                 const EmbedHeader* header = (const EmbedHeader*)_memmem(ptr, size, CART_SIG, STRLEN(CART_SIG));
-    
+
                 if(header)
                 {
                     if(appSize == header->appSize + sizeof(EmbedHeader) + header->cartSize)
                     {
                         u8* data = calloc(1, sizeof(tic_cartridge));
-    
+
                         if(data)
                         {
                             s32 dataSize = tic_tool_unzip(data, sizeof(tic_cartridge), app + header->appSize + sizeof(EmbedHeader), header->cartSize);
-    
+
                             if(dataSize)
                             {
-                                tic_cart_load(&tic->cart, data, dataSize);
-                                tic_api_reset(tic);
+                                tic_cart_load(&start->tic->cart, data, dataSize);
+                                tic_api_reset(start->tic);
                                 start->embed = true;
                             }
-                                
+
                             free(data);
                         }
-    
+
                         break;
                     }
                     else
@@ -234,7 +226,5 @@ void initStart(Start* start, tic_mem* tic, const char* cart)
 
 void freeStart(Start* start)
 {
-    free(start->text);
-    free(start->color);
     free(start);
 }

@@ -28,6 +28,7 @@ typedef struct Code Code;
 
 struct Code
 {
+    Studio* studio;
     tic_mem* tic;
 
     char* src;
@@ -82,17 +83,19 @@ struct Code
 
     enum
     {
-        TEXT_RUN_CODE,
-        TEXT_EDIT_MODE,
         TEXT_DRAG_CODE,
         TEXT_FIND_MODE,
         TEXT_GOTO_MODE,
+        TEXT_BOOKMARK_MODE,
         TEXT_OUTLINE_MODE,
+        TEXT_REPLACE_MODE,
+        TEXT_EDIT_MODE,
     } mode;
 
     struct
     {
         char text[STUDIO_TEXT_BUFFER_WIDTH - sizeof "FIND:"];
+        char* offset;
 
         char* prevPos;
         char* prevSel;
@@ -110,11 +113,24 @@ struct Code
         s32 size;
         s32 index;
         s32 scroll;
-    } outline;
+    } sidebar;
 
     const char* matchedDelim;
     bool altFont;
     bool shadowText;
+
+    struct
+    {
+        s32 pos;
+        s32 sidebar;
+
+        Movie* movie;
+
+        Movie idle;
+        Movie show;
+        Movie hide;
+
+    } anim;
 
     void(*tick)(Code*);
     void(*escape)(Code*);
@@ -122,5 +138,9 @@ struct Code
     void(*update)(Code*);
 };
 
-void initCode(Code*, tic_mem*, tic_code* src);
+void initCode(Code*, Studio* studio);
 void freeCode(Code*);
+void codeGetPos(Code*, s32* x, s32* y);
+void codeSetPos(Code*, s32 x, s32 y);
+
+void trimWhitespace(Code*);

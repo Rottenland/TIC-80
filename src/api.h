@@ -22,12 +22,9 @@
 
 #pragma once
 
+#include "retro_endianness.h"
 #include "tic.h"
-
-// convenience macros to loop languages
-#define FOR_EACH_LANG(ln) for (tic_script_config** conf = Languages ; *conf != NULL; conf++ ) { tic_script_config* ln = *conf;
-#define FOR_EACH_LANG_END }
-
+#include "time.h"
 
 typedef struct { u8 index; tic_flip flip; tic_rotate rotate; } RemapResult;
 typedef void(*RemapFunc)(void*, s32 x, s32 y, RemapResult* result);
@@ -35,15 +32,17 @@ typedef void(*RemapFunc)(void*, s32 x, s32 y, RemapResult* result);
 typedef void(*TraceOutput)(void*, const char*, u8 color);
 typedef void(*ErrorOutput)(void*, const char*);
 typedef void(*ExitCallback)(void*);
+typedef u64(*CounterCallback)(void*);
+typedef u64(*FreqCallback)(void*);
 
 typedef struct
 {
     TraceOutput trace;
     ErrorOutput error;
     ExitCallback exit;
-    
-    u64 (*counter)(void*);
-    u64 (*freq)(void*);
+
+    CounterCallback counter;
+    FreqCallback freq;
     u64 start;
 
     void* data;
@@ -51,8 +50,11 @@ typedef struct
 
 typedef struct tic_mem tic_mem;
 typedef void(*tic_tick)(tic_mem* memory);
+typedef void(*tic_boot)(tic_mem* memory);
 typedef void(*tic_scanline)(tic_mem* memory, s32 row, void* data);
 typedef void(*tic_border)(tic_mem* memory, s32 row, void* data);
+typedef void(*tic_gamemenu)(tic_mem* memory, s32 index, void* data);
+typedef bool(*tic_lang_isalnum)(char c);
 
 typedef struct
 {
@@ -62,42 +64,18 @@ typedef struct
 
 typedef struct
 {
-    tic_scanline scanline;
-    tic_border border;
+    tic_scanline    scanline;
+    tic_border      border;
+    tic_gamemenu    menu;
     void* data;
 } tic_blit_callback;
 
-typedef struct
+typedef enum
 {
-    const char* name;
-    const char* fileExtension;
-    const char* projectComment;
-    struct
-    {
-        bool(*init)(tic_mem* memory, const char* code);
-        void(*close)(tic_mem* memory);
-
-        tic_tick tick;
-        tic_blit_callback callback;
-    };
-
-    const tic_outline_item* (*getOutline)(const char* code, s32* size);
-    void (*eval)(tic_mem* tic, const char* code);
-
-    const char* blockCommentStart;
-    const char* blockCommentEnd;
-    const char* blockCommentStart2;
-    const char* blockCommentEnd2;
-    const char* blockStringStart;
-    const char* blockStringEnd;
-    const char* singleComment;
-    const char* blockEnd;
-
-    const char* const * keywords;
-    s32 keywordsCount;
-} tic_script_config;
-
-extern tic_script_config* Languages[];
+    tic_tiles_texture,
+    tic_map_texture,
+    tic_vbank_texture,
+} tic_texture_src;
 
 typedef struct
 {
@@ -110,9 +88,9 @@ typedef struct
 } tic_rect;
 
 //                  SYNC DEFINITION TABLE
-//       .--------------------------------- - - - 
+//       .--------------------------------- - - -
 //       | CART    | RAM           | INDEX
-//       |---------+---------------+------- - - - 
+//       |---------+---------------+------- - - -
 //       |         |               |
 #define TIC_SYNC_LIST(macro) \
     macro(tiles,    tiles,        0) \
@@ -131,14 +109,18 @@ enum
 #undef TIC_SYNC_DEF
 };
 
-#define TIC_FN "TIC"
-#define SCN_FN "SCN"
-#define OVR_FN "OVR" // deprecated since v1.0
-#define BDR_FN "BDR"
+#define TIC_FN  "TIC"
+#define BOOT_FN "BOOT"
+#define SCN_FN  "SCN"
+#define OVR_FN  "OVR" // deprecated since v1.0
+#define BDR_FN  "BDR"
+#define MENU_FN "MENU"
 
 #define TIC_CALLBACK_LIST(macro)                                                                                    \
     macro(TIC, TIC_FN "()", "Main function. It's called at " DEF2STR(TIC80_FRAMERATE)                               \
         "fps (" DEF2STR(TIC80_FRAMERATE) " times every second).")                                                   \
+    macro(BOOT, BOOT_FN, "Startup function.")                                                                       \
+    macro(MENU, MENU_FN "(index)", "Game Menu handler.")                                                            \
     macro(SCN, SCN_FN "(row)", "Allows you to execute code between the drawing of each scanline, "                  \
         "for example, to manipulate the palette.")                                                                  \
     macro(BDR, BDR_FN "(row)", "Allows you to execute code between the drawing of each fullscreen scanline, "       \
@@ -209,7 +191,7 @@ enum
         5,                                                                                                              \
         0,                                                                                                              \
         void,                                                                                                           \
-        tic_mem*, s32 x1, s32 y1, s32 x2, s32 y2, u8 color)                                                             \
+        tic_mem*, float x1, float y1, float x2, float y2, u8 color)                                                     \
                                                                                                                         \
                                                                                                                         \
     macro(rect,                                                                                                         \
@@ -261,7 +243,7 @@ enum
         0,                                                                                                              \
         void,                                                                                                           \
         tic_mem*, s32 index, s32 x, s32 y, s32 w, s32 h,                                                                \
-        u8* colors, s32 count, s32 scale, tic_flip flip, tic_rotate rotate)                                             \
+        u8* trans_colors, u8 trans_count, s32 scale, tic_flip flip, tic_rotate rotate)                                  \
                                                                                                                         \
                                                                                                                         \
     macro(btn,                                                                                                          \
@@ -334,7 +316,7 @@ enum
         "The map can be up to 240 cells wide by 136 deep.\n"                                                            \
         "This function will draw the desired area of the map to a specified screen position.\n"                         \
         "For example, map(5,5,12,10,0,0) will draw a 12x10 section of the map, "                                        \
-        "starting from map co-ordinates (5,5) to screen position (0,0).\n"                                              \
+        "starting from map coordinates (5,5) to screen position (0,0).\n"                                               \
         "The map function's last parameter is a powerful callback function "                                            \
         "for changing how map cells (sprites) are drawn when map is called.\n"                                          \
         "It can be used to rotate, flip and replace sprites while the game is running.\n"                               \
@@ -350,7 +332,7 @@ enum
         1,                                                                                                              \
         void,                                                                                                           \
         tic_mem*, s32 x, s32 y, s32 width, s32 height, s32 sx, s32 sy,                                                  \
-        u8* colors, s32 count, s32 scale, RemapFunc remap, void* data)                                                  \
+        u8* trans_colors, u8 trans_count, s32 scale, RemapFunc remap, void* data)                                       \
                                                                                                                         \
                                                                                                                         \
     macro(mget,                                                                                                         \
@@ -577,17 +559,17 @@ enum
                                                                                                                         \
                                                                                                                         \
     macro(font,                                                                                                         \
-        "font(text x y chromakey char_width char_height fixed=false scale=1) -> width",                                 \
+        "font(text x y chromakey char_width char_height fixed=false scale=1 alt=false) -> width",                       \
                                                                                                                         \
         "Print string with font defined in foreground sprites.\n"                                                       \
         "To simply print to the screen, check out `print()`.\n"                                                         \
         "To print to the console, check out `trace()`.",                                                                \
-        8,                                                                                                              \
+        9,                                                                                                              \
         6,                                                                                                              \
         0,                                                                                                              \
         s32,                                                                                                            \
         tic_mem*, const char* text, s32 x, s32 y,                                                                       \
-        u8 chromakey, s32 w, s32 h, bool fixed, s32 scale, bool alt)                                                    \
+        u8* trans_colors, u8 trans_count, s32 w, s32 h, bool fixed, s32 scale, bool alt)                                \
                                                                                                                         \
                                                                                                                         \
     macro(mouse,                                                                                                        \
@@ -650,6 +632,18 @@ enum
         tic_mem*, s32 x, s32 y, s32 a, s32 b, u8 color)                                                                 \
                                                                                                                         \
                                                                                                                         \
+    macro(paint,                                                                                                        \
+        "paint(x y color bordercolor=-1)",                                                                              \
+                                                                                                                        \
+        "This function fills a contiguous area with a new color.\n"                                                     \
+        "If bordercolor is given fill will extend to color boundary.",                                                  \
+        4,                                                                                                              \
+        3,                                                                                                              \
+        0,                                                                                                              \
+        void,                                                                                                           \
+        tic_mem*, s32 x, s32 y, u8 color, u8 bordercolor)                                                               \
+                                                                                                                        \
+                                                                                                                        \
     macro(tri,                                                                                                          \
         "tri(x1 y1 x2 y2 x3 y3 color)",                                                                                 \
                                                                                                                         \
@@ -658,7 +652,7 @@ enum
         7,                                                                                                              \
         0,                                                                                                              \
         void,                                                                                                           \
-        tic_mem*, s32 x1, s32 y1, s32 x2, s32 y2, s32 x3, s32 y3, u8 color)                                             \
+        tic_mem*, float x1, float y1, float x2, float y2, float x3, float y3, u8 color)                                 \
                                                                                                                         \
     macro(trib,                                                                                                         \
         "trib(x1 y1 x2 y2 x3 y3 color)",                                                                                \
@@ -668,27 +662,26 @@ enum
         7,                                                                                                              \
         0,                                                                                                              \
         void,                                                                                                           \
-        tic_mem*, s32 x1, s32 y1, s32 x2, s32 y2, s32 x3, s32 y3, u8 color)                                             \
+        tic_mem*, float x1, float y1, float x2, float y2, float x3, float y3, u8 color)                                 \
                                                                                                                         \
                                                                                                                         \
-    macro(textri,                                                                                                       \
-        "textri(x1 y1 x2 y2 x3 y3 u1 v1 u2 v2 u3 v3 use_map=false chromakey=-1)",                                       \
+    macro(ttri,                                                                                                         \
+        "ttri(x1 y1 x2 y2 x3 y3 u1 v1 u2 v2 u3 v3 texsrc=0 chromakey=-1 z1=0 z2=0 z3=0)",                               \
                                                                                                                         \
-        "It renders a triangle filled with texture from image ram or map ram.\n"                                        \
+        "It renders a triangle filled with texture from image ram, map ram or vbank.\n"                                 \
         "Use in 3D graphics.\n"                                                                                         \
-        "This function does not perform perspective correction, so it is not generally suitable for 3D graphics "       \
-        "(except in some constrained scenarios).\n"                                                                     \
         "In particular, if the vertices in the triangle have different 3D depth, you may see some distortion.\n"        \
-        "These can be thought of as the window inside image ram (sprite sheet), or map ram.\n"                          \
+        "These can be thought of as the window inside image ram (sprite sheet), map ram or another vbank.\n"            \
         "Note that the sprite sheet or map in this case is treated as a single large image, "                           \
         "with U and V addressing its pixels directly, rather than by sprite ID.\n"                                      \
         "So for example the top left corner of sprite #2 would be located at u=16, v=0.",                               \
-        14,                                                                                                             \
+        17,                                                                                                             \
         12,                                                                                                             \
         0,                                                                                                              \
         void,                                                                                                           \
         tic_mem*, float x1, float y1, float x2, float y2, float x3, float y3,                                           \
-        float u1, float v1, float u2, float v2, float u3, float v3, bool use_map, u8* colors, s32 count)                \
+        float u1, float v1, float u2, float v2, float u3, float v3, tic_texture_src texsrc, u8* colors, s32 count,      \
+        float z1, float z2, float z3, bool depth)                                                                       \
                                                                                                                         \
                                                                                                                         \
     macro(clip,                                                                                                         \
@@ -801,7 +794,35 @@ enum
         3,                                                                                                              \
         0,                                                                                                              \
         void,                                                                                                           \
-        tic_mem*, s32 index, u8 flag, bool value)
+        tic_mem*, s32 index, u8 flag, bool value)                                                                       \
+                                                                                                                        \
+                                                                                                                        \
+    macro(fft,                                                                                                          \
+        "fft(start_freq end_freq=-1)",                                                                                  \
+                                                                                                                        \
+        "Retrieves a value from 1024 buckets that map to a region of audible frequencies.\n"                            \
+        "Each has value of roughly 0..1 based on the intensity of sound at that frequency at that time.\n"              \
+        "If end_freq is not provided, a single value is returned for the start_freq.\n"                                 \
+        "If end_freq is provided, a sum of all values in the range is returned.",                                       \
+        2,                                                                                                              \
+        1,                                                                                                              \
+        0,                                                                                                              \
+        double,                                                                                                         \
+        tic_mem*, s32 startFreq, s32 endFreq)                                                                           \
+                                                                                                                        \
+                                                                                                                        \
+    macro(ffts,                                                                                                         \
+        "ffts(start_freq end_freq=-1)",                                                                                 \
+                                                                                                                        \
+        "Creates 1024 buckets that map to a region of audible frequencies and applies smoothing to it.\n"               \
+        "Each returns a value of roughly 0..1 based on the intensity of sound at that frequency at that time.\n"        \
+        "If end_freq is not provided, a single value is returned for the start_freq.\n"                                 \
+        "If end_freq is provided, a sum of all values in the range is returned.",                                       \
+        2,                                                                                                              \
+        1,                                                                                                              \
+        0,                                                                                                              \
+        double,                                                                                                         \
+        tic_mem*, s32 startFreq, s32 endFreq)
 
 #define TIC_API_DEF(name, _, __, ___, ____, _____, ret, ...) ret tic_api_##name(__VA_ARGS__);
 TIC_API_LIST(TIC_API_DEF)
@@ -809,8 +830,11 @@ TIC_API_LIST(TIC_API_DEF)
 
 struct tic_mem
 {
-    tic_ram             ram;
-    tic_cartridge       cart;
+    tic80           product;
+    tic_ram*        ram;
+    tic_cartridge   cart;
+
+    tic_ram*        base_ram;
 
     char saveid[TIC_SAVEID_SIZE];
 
@@ -818,29 +842,24 @@ struct tic_mem
     {
         struct
         {
+#if RETRO_IS_BIG_ENDIAN
+            u8 padded:5;
+            u8 keyboard:1;
+            u8 mouse:1;
+            u8 gamepad:1;
+#else
             u8 gamepad:1;
             u8 mouse:1;
             u8 keyboard:1;
+            u8 padded:5;
+#endif
         };
 
         u8 data;
     } input;
-
-    struct
-    {
-        s16* buffer;
-        s32 size;
-    } samples;
-
-#if defined(_3DS)
-    u32 *screen;
-#else
-    u32 screen[TIC80_FULLWIDTH * TIC80_FULLHEIGHT];
-#endif
-    tic80_pixel_color_format screen_format;
 };
 
-tic_mem* tic_core_create(s32 samplerate);
+tic_mem* tic_core_create(s32 samplerate, tic80_pixel_color_format format);
 void tic_core_close(tic_mem* memory);
 void tic_core_pause(tic_mem* memory);
 void tic_core_resume(tic_mem* memory);
@@ -850,15 +869,6 @@ void tic_core_tick_end(tic_mem* memory);
 void tic_core_synth_sound(tic_mem* tic);
 void tic_core_blit(tic_mem* tic);
 void tic_core_blit_ex(tic_mem* tic, tic_blit_callback clb);
-const tic_script_config* tic_core_script_config(tic_mem* memory);
-
-typedef struct
-{
-    tic80 tic;
-    tic_mem* memory;
-    tic_tick_data tickData;
-    u64 tick_counter;
-} tic80_local;
 
 #define VBANK(tic, bank)                                \
     bool MACROVAR(_bank_) = tic_api_vbank(tic, bank);   \

@@ -29,12 +29,19 @@ typedef struct Sprite Sprite;
 
 struct Sprite
 {
+    Studio* studio;
     tic_mem* tic;
 
     tic_tiles* src;
     tic_tilesheet sheet;
 
     u32 tickCounter;
+
+    struct
+    {
+        bool start;
+        tic_point last;
+    } draw;
 
     u16 index;
     u8 color;
@@ -43,6 +50,7 @@ struct Sprite
     u8 brushSize;
     u16 x,y;
     bool advanced;
+    bool hexindex;
 
     tic_blit blit;
 
@@ -62,6 +70,12 @@ struct Sprite
         u8* front;
     } select;
 
+    struct
+    {
+        bool edit;
+        s32 pos;
+    } flags;
+
     enum
     {
         SPRITE_DRAW_MODE,
@@ -71,6 +85,22 @@ struct Sprite
     } mode;
 
     struct History* history;
+
+    struct
+    {
+        struct
+        {
+            s32 bank;
+            s32 page;
+        } pos;
+
+        Movie* movie;
+
+        Movie idle;
+        Movie bank;
+        Movie page;
+
+    } anim;
 
     void (*tick)(Sprite*);
     void (*event)(Sprite*, StudioEvent);
@@ -82,6 +112,6 @@ typedef struct
     s32 cell_w, cell_h, cols, rows, length;
 } tic_palette_dimensions;
 
-void initSprite(Sprite*, tic_mem*, tic_tiles* src);
+void initSprite(Sprite*, Studio* studio, tic_tiles* src);
 void freeSprite(Sprite*);
 
